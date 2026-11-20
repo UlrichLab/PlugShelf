@@ -73,20 +73,20 @@ void *ph_vst2_load(const char *path, char *err, int errLen) {
     CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, (CFIndex)strlen(path), true);
     CFBundleRef bundle = url ? CFBundleCreate(NULL, url) : NULL;
     if (url) CFRelease(url);
-    if (!bundle) { seterr2(err, errLen, "Bundle nicht lesbar"); return NULL; }
-    if (!CFBundleLoadExecutable(bundle)) { seterr2(err, errLen, "Programm lässt sich nicht laden"); return NULL; }
+    if (!bundle) { seterr2(err, errLen, "Cannot read the bundle"); return NULL; }
+    if (!CFBundleLoadExecutable(bundle)) { seterr2(err, errLen, "Cannot load the binary"); return NULL; }
     typedef AEffect *(*Main)(AudioMaster);
     Main entry = (Main)CFBundleGetFunctionPointerForName(bundle, CFSTR("VSTPluginMain"));
     if (!entry) entry = (Main)CFBundleGetFunctionPointerForName(bundle, CFSTR("main_macho"));
     if (!entry) entry = (Main)CFBundleGetFunctionPointerForName(bundle, CFSTR("main"));
-    if (!entry) { seterr2(err, errLen, "kein VST2-Einstiegspunkt"); return NULL; }
+    if (!entry) { seterr2(err, errLen, "No VST2 entry point"); return NULL; }
     AEffect *e = entry(host_cb);
-    if (!e || e->magic != kMagic) { seterr2(err, errLen, "Plugin startet nicht"); return NULL; }
+    if (!e || e->magic != kMagic) { seterr2(err, errLen, "The plugin does not start"); return NULL; }
     e->dispatcher(e, effOpen, 0, 0, NULL, 0);
     e->dispatcher(e, effSetSampleRate, 0, 0, NULL, 44100.0f);
     e->dispatcher(e, effSetBlockSize, 0, 512, NULL, 0);
     e->dispatcher(e, effMainsChanged, 0, 1, NULL, 0);
-    if (!(e->flags & effFlagsHasEditor)) { seterr2(err, errLen, "Plugin hat kein eigenes Fenster"); return NULL; }
+    if (!(e->flags & effFlagsHasEditor)) { seterr2(err, errLen, "The plugin has no editor window"); return NULL; }
     V2 *h = calloc(1, sizeof(V2));
     h->bundle = bundle; h->e = e;
     return h;

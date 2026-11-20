@@ -19,10 +19,11 @@ enum CaptureMode {
     static var auController: NSViewController?
 
     static func run(_ args: [String]) -> Never {
-        guard args.count >= 5 else { fail("Aufruf: --capture <format> <pfad> <name> <uid> <out.png>") }
+        guard args.count >= 5 else { fail("Usage: --capture <format> <path> <name> <uid> <out.png>") }
         let (format, path, name, uid, out) = (args[0], args[1], args[2], args[3], URL(fileURLWithPath: args[4]))
         // Plugins print all sorts of things; keep our own answer easy to find.
         setvbuf(stdout, nil, _IOLBF, 0)
+        ph_install_crash_guard()
 
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
@@ -44,7 +45,7 @@ enum CaptureMode {
         var err = [CChar](repeating: 0, count: 512)
         switch format {
         case "VST3":
-            guard let h = ph_vst3_load(path, name, &err, Int32(err.count)) else { fail(String(cString: err)) }
+            guard let h = ph_vst3_load(path, name, 1, &err, Int32(err.count)) else { fail(String(cString: err)) }
             var w: Int32 = 0, hh: Int32 = 0
             if ph_vst3_size(h, &w, &hh) != 0 { resize(Int(w), Int(hh)) }
             show()
@@ -63,7 +64,7 @@ enum CaptureMode {
         case "AU":
             openAU(uid)
         default:
-            fail("Format \(format) wird nicht unterstützt")
+            fail("Format \(format) is not supported")
         }
 
         captureLoop(to: out)
@@ -100,16 +101,16 @@ enum CaptureMode {
 
     static func openAU(_ uid: String) {
         let p = uid.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
-        guard p.count == 3 else { fail("AU-Kennung unbekannt") }
+        guard p.count == 3 else { fail("Unknown AU id") }
         let desc = AudioComponentDescription(componentType: fourCC(p[0]), componentSubType: fourCC(p[1]),
                                              componentManufacturer: fourCC(p[2]), componentFlags: 0, componentFlagsMask: 0)
         var done = false
         AVAudioUnit.instantiate(with: desc, options: []) { unit, error in
             DispatchQueue.main.async {
-                guard let unit = unit else { fail("AU startet nicht: \(error?.localizedDescription ?? "unbekannt")") }
+                guard let unit = unit else { fail("AU does not start: \(error?.localizedDescription ?? "unknown")") }
                 unit.auAudioUnit.requestViewController { vc in
                     DispatchQueue.main.async {
-                        guard let vc = vc else { fail("Plugin hat kein eigenes Fenster") }
+                        guard let vc = vc else { fail("The plugin has no editor window") }
                         auController = vc
                         var size = vc.preferredContentSize
                         if size.width < 10 || size.height < 10 { size = vc.view.frame.size }
@@ -128,7 +129,7 @@ enum CaptureMode {
         }
         let until = Date().addingTimeInterval(15)
         while !done && Date() < until { pump(0.05) }
-        if !done { fail("AU antwortet nicht") }
+        if !done { fail("The AU does not respond") }
     }
 
     // MARK: picture
@@ -162,7 +163,7 @@ enum CaptureMode {
             pump(0.6)
         }
         if let l = last { save(l, to: out) }
-        fail("Das Fenster blieb leer")
+        fail("The window stayed empty")
     }
 
     private typealias WindowImageFn = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
@@ -209,24 +210,26 @@ enum CaptureMode {
         let w = max(1, Int((Double(img.width) * scale).rounded())), h = max(1, Int((Double(img.height) * scale).rounded()))
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { fail("Bild lässt sich nicht verkleinern") }
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { fail("Cannot scale the picture") }
         ctx.interpolationQuality = .high
         ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
         guard let small = ctx.makeImage(),
               let dst = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
-            fail("Bild lässt sich nicht speichern")
+            fail("Cannot save the picture")
         }
         CGImageDestinationAddImage(dst, small, nil)
-        guard CGImageDestinationFinalize(dst) else { fail("Bild lässt sich nicht speichern") }
+        guard CGImageDestinationFinalize(dst) else { fail("Cannot save the picture") }
         print("PLUGSHELF-OK \(w) \(h)")
         fflush(stdout)
         // Skip tearing the plugin down: some crash on the way out, and the picture is safe.
-        exit(0)
+        // _exit, not exit: skip the plugin's static destructors – some (e.g. UAD's) crash on the way out,
+        // and the result is already written.
+        _exit(0)
     }
 
     static func fail(_ msg: String) -> Never {
         print("PLUGSHELF-ERR \(msg.replacingOccurrences(of: "\n", with: " "))")
         fflush(stdout)
-        exit(1)
+        _exit(1)
     }
 }

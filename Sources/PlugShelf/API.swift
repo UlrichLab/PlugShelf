@@ -6,6 +6,7 @@ final class API {
     let user = UserStore()
     let scanner = Scanner()
     let thumbs = Thumbs()
+    let racks = RackBuilder()
     private let lock = NSLock()
     private var library: Library?
     private var libraryData = Data("null".utf8)
@@ -70,7 +71,7 @@ final class API {
             return .json(Ableton.send(["op": "ping"], timeout: 0.6))
         case ("POST", "/api/reveal"):
             let path = r.json()["path"] as? String ?? ""
-            guard knownPath(path) else { return .error(400, "Unbekannter Pfad") }
+            guard knownPath(path) else { return .error(400, "Unknown path") }
             DispatchQueue.main.async {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
             }
@@ -100,12 +101,36 @@ final class API {
             lock.lock(); let lib = library; lock.unlock()
             let n = thumbs.importRone(lib)
             return .json(["ok": true, "imported": n])
+        case ("POST", "/api/rack/build"):
+            let b = r.json()
+            let slots = ((b["slots"] as? [[String: Any]]) ?? []).compactMap { s -> RackBuilder.Slot? in
+                guard let f = s["family"] as? String, let role = s["role"] as? String else { return nil }
+                var set: [String: (Double, String)] = [:]
+                for (k, v) in (s["set"] as? [String: [Any]]) ?? [:] {
+                    if let n = (v.first as? NSNumber)?.doubleValue { set[k] = (n, v.count > 1 ? (v[1] as? String ?? "") : "") }
+                }
+                return RackBuilder.Slot(family: f, role: role, label: s["label"] as? String ?? "", set: set,
+                                        macros: (s["macros"] as? [String]) ?? [])
+            }
+            guard !slots.isEmpty else { return .error(400, "Empty chain") }
+            lock.lock(); let lib = library; lock.unlock()
+            let ok = racks.start(name: b["name"] as? String ?? "PlugShelf Rack", annotation: b["annotation"] as? String ?? "",
+                                 slots: slots, returns: b["returns"] as? Bool ?? false, library: lib, load: b["load"] as? Bool ?? false)
+            return .json(ok ? ["ok": true] as [String: Any] : ["ok": false, "msg": "A rack is already being built"])
+        case ("GET", "/api/rack/build"):
+            let p = racks.progress
+            var out: [String: Any] = ["running": p.running, "done": p.done, "total": p.total, "current": p.current]
+            if let res = racks.result { out["result"] = res }
+            return .json(out)
+        case ("POST", "/api/live"):
+            // Developer helper: pass a command straight to the Live script (used for testing).
+            return .json(Ableton.send(r.json(), timeout: 4))
         case ("POST", "/api/window"):
             let on = r.json()["onTop"] as? Bool ?? false
             DispatchQueue.main.async { self.onTop?(on) }
             return .json(["ok": true])
         default:
-            return .error(404, "Unbekannt: \(r.path)")
+            return .error(404, "Unknown: \(r.path)")
         }
     }
 
@@ -116,7 +141,7 @@ final class API {
 
     /// Queues pictures for the given families, each with the format it can best be opened in.
     private func startCapture(_ families: [String]) -> HTTPResponse {
-        if thumbs.progress.running { return .json(["ok": false, "msg": "Es werden schon Bilder aufgenommen"]) }
+        if thumbs.progress.running { return .json(["ok": false, "msg": "Pictures are already being taken"]) }
         lock.lock()
         var byFamily: [String: [Plugin]] = [:]
         for p in library?.plugins ?? [] { byFamily[p.family, default: []].append(p) }
@@ -133,7 +158,7 @@ final class API {
     private func thumb(_ path: String) -> HTTPResponse {
         let name = String(path.dropFirst("/thumbs/".count))
         guard name.range(of: #"^[0-9a-f]{16}\.png$"#, options: .regularExpression) != nil,
-              let d = try? Data(contentsOf: Thumbs.dir.appendingPathComponent(name)) else { return .error(404, "Kein Bild") }
+              let d = try? Data(contentsOf: Thumbs.dir.appendingPathComponent(name)) else { return .error(404, "No picture") }
         var res = HTTPResponse.data(d, type: "image/png")
         res.headers["Cache-Control"] = "max-age=31536000"   // the URL carries a version
         return res
@@ -164,9 +189,9 @@ final class API {
     private func load(_ body: [String: Any]) -> HTTPResponse {
         let ids = (body["ids"] as? [String]) ?? [(body["id"] as? String) ?? ""]
         let ps = plugins(ids)
-        guard !ps.isEmpty else { return .error(400, "Plugin nicht gefunden – bitte neu scannen") }
+        guard !ps.isEmpty else { return .error(400, "Plugin not found – please rescan") }
         if let aax = ps.first(where: { $0.format == "AAX" }) {
-            return .json(["ok": false, "msg": "\(aax.display) gibt es hier nur als AAX – das lädt nur Pro Tools."])
+            return .json(["ok": false, "msg": "\(aax.display) is only installed as AAX – only Pro Tools loads that."])
         }
         let items: [[String: Any]] = ps.map { ["name": $0.liveName, "format": $0.format, "vendor": $0.vendor] }
         var reply = ps.count == 1
@@ -195,7 +220,7 @@ final class API {
         let rel = path == "/" ? "index.html" : String(path.dropFirst())
         let url = Paths.web.appendingPathComponent(rel).standardizedFileURL
         guard url.path.hasPrefix(Paths.web.standardizedFileURL.path + "/"),
-              let d = try? Data(contentsOf: url) else { return .error(404, "Nicht gefunden") }
+              let d = try? Data(contentsOf: url) else { return .error(404, "Not found") }
         return .data(d, type: API.types[url.pathExtension.lowercased()] ?? "application/octet-stream")
     }
 }

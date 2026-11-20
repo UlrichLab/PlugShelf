@@ -4,7 +4,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="0.1.0"
-APP="build/PlugShelf.app"
+OUT="build/PlugShelf.app"
+# Assemble and sign outside the project folder: when it lives in iCloud Drive, the File Provider
+# stamps Finder info onto a fresh bundle, and codesign refuses to sign it ("detritus not allowed").
+STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/plugshelf-build.XXXXXX")"
+trap 'rm -rf "$STAGE_DIR"' EXIT
+APP="$STAGE_DIR/PlugShelf.app"
 
 swift build -c release --arch arm64 --arch x86_64
 BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/PlugShelf"
@@ -45,5 +50,25 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 xattr -cr "$APP"
-codesign --force --deep --sign - "$APP"
-echo "Fertig: $APP"
+
+# Sign with a stable identity when there is one, so macOS keeps privacy permissions
+# (e.g. "access to Documents", which plugins opened by PlugShelf ask for) across rebuilds.
+# An ad-hoc signature changes with every build, and macOS then asks again.
+# Override with PLUGSHELF_SIGN_ID=<identity or SHA-1>, or PLUGSHELF_SIGN_ID=- for ad hoc.
+SIGN_ID="${PLUGSHELF_SIGN_ID:-}"
+if [[ -z "$SIGN_ID" ]]; then
+  SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null \
+    | awk '/"(Apple Development|Developer ID Application|Mac Developer)/ { print $2; exit }')
+fi
+if [[ -n "$SIGN_ID" && "$SIGN_ID" != "-" ]]; then
+  codesign --force --deep --timestamp=none --sign "$SIGN_ID" "$APP"
+  echo "Signed with a stable identity (${SIGN_ID:0:8}…)"
+else
+  codesign --force --deep --sign - "$APP"
+  echo "Signed ad hoc (macOS will ask for permissions again after each build)"
+fi
+mkdir -p build
+rm -rf "$OUT"
+ditto --noextattr "$APP" "$OUT"
+codesign --verify --deep --strict "$OUT"
+echo "Done: $OUT"

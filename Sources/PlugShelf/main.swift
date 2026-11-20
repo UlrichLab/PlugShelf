@@ -10,6 +10,10 @@ import WebKit
 if CommandLine.arguments.count > 1 && CommandLine.arguments[1] == "--capture" {
     CaptureMode.run(Array(CommandLine.arguments.dropFirst(2)))
 }
+// A helper process that reads one VST3 plugin's parameters and default state (see Params.swift).
+if CommandLine.arguments.count > 1 && CommandLine.arguments[1] == "--params" {
+    ParamsMode.run(Array(CommandLine.arguments.dropFirst(2)))
+}
 
 let api = API()
 let server = HTTPServer { api.handle($0) }
@@ -19,7 +23,7 @@ do {
     FileHandle.standardError.write(Data("PlugShelf: \(error.localizedDescription)\n".utf8))
     exit(1)
 }
-print("PlugShelf läuft auf http://127.0.0.1:\(server.port)/")
+print("PlugShelf is running on http://127.0.0.1:\(server.port)/")
 if !api.hasLibrary { api.startScan() }
 
 if CommandLine.arguments.contains("--headless") {
@@ -82,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let a = NSAlert()
         a.messageText = message
         a.addButton(withTitle: "OK")
-        a.addButton(withTitle: "Abbrechen")
+        a.addButton(withTitle: "Cancel")
         completionHandler(a.runModal() == .alertFirstButtonReturn)
     }
 
@@ -102,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         field.stringValue = defaultText ?? ""
         a.accessoryView = field
         a.addButton(withTitle: "OK")
-        a.addButton(withTitle: "Abbrechen")
+        a.addButton(withTitle: "Cancel")
         a.window.initialFirstResponder = field
         completionHandler(a.runModal() == .alertFirstButtonReturn ? field.stringValue : nil)
     }
@@ -112,36 +116,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Über PlugShelf", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About PlugShelf", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "PlugShelf ausblenden", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Hide PlugShelf", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "PlugShelf beenden", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit PlugShelf", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
 
         let editItem = NSMenuItem()
-        let edit = NSMenu(title: "Bearbeiten")
-        edit.addItem(withTitle: "Widerrufen", action: Selector(("undo:")), keyEquivalent: "z")
-        edit.addItem(withTitle: "Wiederholen", action: Selector(("redo:")), keyEquivalent: "Z")
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
         edit.addItem(.separator())
-        edit.addItem(withTitle: "Ausschneiden", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        edit.addItem(withTitle: "Kopieren", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        edit.addItem(withTitle: "Einsetzen", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        edit.addItem(withTitle: "Alles auswählen", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = edit
         main.addItem(editItem)
 
         let viewItem = NSMenuItem()
-        let view = NSMenu(title: "Darstellung")
-        view.addItem(withTitle: "Neu laden", action: #selector(reloadPage), keyEquivalent: "r")
+        let view = NSMenu(title: "View")
+        view.addItem(withTitle: "Reload", action: #selector(reloadPage), keyEquivalent: "r")
         viewItem.submenu = view
         main.addItem(viewItem)
 
         let winItem = NSMenuItem()
-        let win = NSMenu(title: "Fenster")
-        win.addItem(withTitle: "Minimieren", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        win.addItem(withTitle: "Schließen", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let win = NSMenu(title: "Window")
+        win.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        win.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         winItem.submenu = win
         main.addItem(winItem)
 

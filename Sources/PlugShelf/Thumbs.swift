@@ -43,7 +43,7 @@ final class Thumbs {
                 let v = (s["v"] as? Double).map { String(Int($0)) } ?? "0"
                 thumbs[f] = "thumbs/\(Classify.stableId(f)).png?v=\(v)"
             } else {
-                failed[f] = s["msg"] as? String ?? "kein Bild"
+                failed[f] = s["msg"] as? String ?? "no picture"
             }
         }
         return ["thumbs": thumbs, "failed": failed]
@@ -140,7 +140,7 @@ final class Thumbs {
         }
         let done = DispatchSemaphore(value: 0)
         proc.terminationHandler = { _ in done.signal() }
-        do { try proc.run() } catch { return (false, "Hilfsprozess startet nicht") }
+        do { try proc.run() } catch { return (false, "The helper process does not start") }
         lock.lock(); current = proc; lock.unlock()
 
         var timedOut = false
@@ -161,15 +161,15 @@ final class Thumbs {
         if text.contains("PLUGSHELF-OK"), FileManager.default.fileExists(atPath: tmp.path) {
             let dst = Thumbs.file(job.family)
             try? FileManager.default.removeItem(at: dst)
-            do { try FileManager.default.moveItem(at: tmp, to: dst) } catch { return (false, "Bild lässt sich nicht speichern") }
+            do { try FileManager.default.moveItem(at: tmp, to: dst) } catch { return (false, "Cannot save the picture") }
             return (true, "")
         }
         if let line = text.split(separator: "\n").last(where: { $0.hasPrefix("PLUGSHELF-ERR") }) {
             return (false, String(line.dropFirst("PLUGSHELF-ERR ".count)))
         }
-        if timedOut { return (false, "Zeitüberschreitung – wartet das Plugin auf eine Aktivierung?") }
-        if intelOnly && proc.terminationStatus != 0 { return (false, "Nur Intel – Rosetta fehlt oder Plugin abgestürzt") }
-        return (false, proc.terminationReason == .uncaughtSignal ? "Plugin ist abgestürzt" : "Plugin hat sich beendet")
+        if timedOut { return (false, "Timed out – is the plugin waiting for activation?") }
+        if intelOnly && proc.terminationStatus != 0 { return (false, "Intel only – Rosetta missing or the plugin crashed") }
+        return (false, proc.terminationReason == .uncaughtSignal ? "The plugin crashed" : "The plugin quit")
     }
 
     // MARK: RONE VST MANAGER's pictures

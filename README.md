@@ -1,82 +1,75 @@
 # PlugShelf
 
-Eine Plugin-Bibliothek für den Mac: findet alle installierten Plugins (VST3, AU, VST2, CLAP, AAX),
-zeigt sie als Kacheln nach Kategorie und Hersteller und lädt sie mit einem Klick auf die gewählte
-Spur in Ableton Live. Eigenständiger Nachbau der Kernfunktionen von RONE VST MANAGER.
+A plugin library for the Mac that loads plugins, signal chains and Ableton racks straight into Ableton Live.
+An independent rebuild of the core of RONE VST MANAGER, plus a chain builder of its own.
 
-## Bauen und starten
+<p>
+  <a href="docs/screenshots/library.webp"><img src="docs/screenshots/library.webp" width="32%" alt="Library"></a>
+  <a href="docs/screenshots/chains.webp"><img src="docs/screenshots/chains.webp" width="32%" alt="Chains"></a>
+  <a href="docs/screenshots/health.webp"><img src="docs/screenshots/health.webp" width="32%" alt="Health"></a>
+</p>
+
+## Features
+
+- **Library** – finds every installed plugin (VST3, AU, VST2, CLAP, AAX) and shows one tile per plugin with a
+  picture of its editor. Search, categories, makers, formats, favourites, collections, racks, recently loaded.
+  One click (or Enter) loads a plugin onto Live's selected track.
+- **Only what runs** – uses versions that run natively on this Mac and that Live accepts (no Intel-only files on
+  Apple Silicon, no AAX, nothing Live's own scan rejected), VST3 first.
+- **Plugin pictures** – PlugShelf opens each plugin briefly in its own mini host (VST3, VST2, AU) and captures the
+  editor; each capture runs in a separate process, so a crashing plugin never takes the app down.
+- **Chains** – 167 signal-chain templates in 12 categories and 6 genres: vocals, drums, bass, mix bus, mastering,
+  UAD/Apollo chains, dub techno, and 100 **Famous Chains** of well-known records, engineers and mastering rooms
+  (e.g. "Michael Jackson – Thriller": Neve 1084 → 1176). A slot that names hardware takes your emulation of it,
+  otherwise a comparable plugin marked "Stand-in". Two dice: *Roll plugins* swaps plugins within their role,
+  *New chain* builds a new layout.
+- **Ableton racks** – a chain becomes an Audio Effect Rack (`.adg`) with named macros: the settings a chain leaves
+  to taste first, every compressor/limiter/clipper threshold always, documented values as starting points.
+  Saved to the User Library or loaded straight onto the selected track.
+- **Health** – disk use, VST2 copies next to a VST3, AAX without Pro Tools, Intel-only, broken bundles, Live scan
+  failures. Nothing is deleted; "Finder" shows the file.
+
+## Build and run
 
 ```bash
 ./scripts/build.sh
-open build/PlugShelf.app
+ditto --noextattr build/PlugShelf.app /Applications/PlugShelf.app
 ```
 
-`build.sh` baut eine Universal-App (Apple Silicon + Intel), erzeugt das Icon und signiert ad hoc.
-Zum Installieren `build/PlugShelf.app` nach `/Applications` ziehen.
+`build.sh` builds a universal app (Apple Silicon + Intel). It signs with your Apple Development / Developer ID
+certificate if there is one, so macOS keeps privacy permissions across builds, otherwise ad hoc. It signs in a
+temp folder because iCloud Drive stamps Finder info onto bundles, which codesign refuses.
 
-Entwicklung ohne Fenster (Seite im Browser unter http://127.0.0.1:47900/):
+Development without the window (page at http://127.0.0.1:47900/):
 
 ```bash
 swift build -c release && .build/release/PlugShelf --headless
 ```
 
-## Ableton Live einrichten
+## Connect Ableton Live
 
-1. In PlugShelf → **Setup** → **Script installieren**. Das kopiert `ableton/PlugShelf` nach
-   `<User Library>/Remote Scripts/PlugShelf` (User Library der zuletzt benutzten Live-Version).
-2. Live neu starten.
-3. Live → Einstellungen → Link, Tempo & MIDI → Control Surface → **PlugShelf** (Ein-/Ausgang: Keine).
-4. In PlugShelf → **Verbindung testen**. Die Anzeige oben wird grün.
+1. PlugShelf → **Setup** → **Install script** (copies `ableton/PlugShelf` to `<User Library>/Remote Scripts`).
+2. Restart Live once, then Settings → Link, Tempo & MIDI → Control Surface → **PlugShelf** (input/output: None).
+3. **Test connection** – the indicator turns green.
 
-Das Script hört auf UDP `127.0.0.1:47812` und läuft problemlos neben dem RONE-Script (Port 47811).
+The script listens on UDP `127.0.0.1:47812`; script updates reach a running Live without a restart.
 
-## Was drin ist
+## Layout
 
-- **Scan**: liest Bundles direkt (Info.plist, VST3 `moduleinfo.json`, AU `AudioComponents`) und ergänzt
-  Namen, Hersteller, Instrument/Effekt und Kategorien aus Ableton's eigener Plugin-Datenbank
-  (`Live-plugins-1.db`, nur gelesen, aus einer Kopie). Erkennt Intel-only-Binaries und defekte Bundles.
-  Formate eines Plugins werden zu einer Kachel zusammengeführt.
-- **Bibliothek**: Suche (`/`, Pfeiltasten, Enter lädt), Typ, Kategorien, Hersteller, Formate, Sortierung,
-  Favoriten, eigene Sammlungen, „Zuletzt geladen“, „Neu installiert“, Ausblenden, Notizen,
-  Kategorie-Korrektur pro Plugin, Kachelgröße.
-- **Racks**: Ketten aus mehreren Plugins, per Drag & Drop sortierbar, laden in Reihenfolge auf eine Spur.
-- **Chains**: typische Signalketten aus deinen Plugins, in 10 Rubriken (Vocals, Drums, Bass, Percussion,
-  Instrumental, Trance & Leads, Modulation & FX, Send-Effekte, Mixbus, Mastering) mit 36 Vorlagen, z. B. ein
-  Vocal-Strip im Apollo-/Unison-Stil oder ein Trance-Supersaw-Lead. Zwei Würfel: **Plugins würfeln** behält die
-  Module (Kompressor bleibt Kompressor, Hall bleibt Hall) und tauscht jedes gegen ein anderes Plugin seiner Art;
-  **Neue Chain** baut einen neuen Aufbau aus der gewählten Rubrik. Module sperren, einzeln würfeln, von Hand
-  wählen, verschieben, hinzufügen; als Rack speichern oder direkt in Live laden. Plugins, die zum Stil eines
-  Moduls passen (z. B. 1176-Typ für „Kompressor – schnell“), werden meist bevorzugt.
-- **Health**: Gesamtgröße, VST2-Kopien neben VST3, AAX ohne Pro Tools, nur Intel, defekte Bundles,
-  Fehler beim Live-Scan, noch nicht in Live gescannt, größte Plugins. Nichts wird gelöscht – nur „Im Finder zeigen“.
-- **Plugin-Bilder**: PlugShelf öffnet jedes Plugin kurz in einem kleinen Fenster unten rechts und fotografiert
-  dessen Oberfläche (eigener Mini-Host für VST3, VST2 und AU; Intel-only-Plugins laufen über Rosetta).
-  Jede Aufnahme läuft in einem eigenen Prozess mit Zeitlimit – ein abstürzendes Plugin trifft nie die App.
-  Einmalig lassen sich die Aufnahmen übernehmen, die RONE VST MANAGER auf diesem Mac schon gemacht hat.
-  Rechtsklick → „Bild neu aufnehmen“ / „Bild entfernen“.
-- **Setup**: Live-Script installieren/aktualisieren, Verbindungstest, Format-Reihenfolge, AAX ein/aus, Plugin-Bilder.
-
-## Aufbau
-
-| Teil | Datei |
+| Part | Files |
 | --- | --- |
-| App, Fenster (WKWebView), Menü | `Sources/PlugShelf/main.swift` |
-| Lokaler HTTP-Server (nur 127.0.0.1) | `Sources/PlugShelf/HTTPServer.swift` |
-| API-Routen | `Sources/PlugShelf/API.swift` |
-| Scanner, Familien | `Sources/PlugShelf/Scanner.swift` |
-| Namen, Hersteller, Kategorien | `Sources/PlugShelf/Classify.swift` |
-| Ableton-Plugin-Datenbank | `Sources/PlugShelf/LiveDB.swift` |
-| UDP zu Live, Script-Installation | `Sources/PlugShelf/Ableton.swift` |
-| Nutzerdaten (Favoriten, Racks …) | `Sources/PlugShelf/Store.swift` |
-| Bilder: Warteschlange, Speicher, RONE-Import | `Sources/PlugShelf/Thumbs.swift` |
-| Bilder: Aufnahme-Prozess (`--capture`), AU | `Sources/PlugShelf/Capture.swift` |
-| Mini-Host für VST3 / VST2 (C) | `Sources/CPlugHost/` |
-| Oberfläche | `web/index.html`, `web/app.css`, `web/app.js` |
-| Chains: Rollen, Rubriken, Vorlagen / Tab | `web/chain-data.js`, `web/chains.js` |
-| Live-Script | `ableton/PlugShelf/__init__.py` |
+| App, window, local HTTP server, API | `Sources/PlugShelf/main.swift`, `HTTPServer.swift`, `API.swift` |
+| Scanner, names and categories, Live's plugin database | `Scanner.swift`, `Classify.swift`, `LiveDB.swift` |
+| Live connection, user data | `Ableton.swift`, `Store.swift` |
+| Pictures, plugin parameters (helper processes) | `Thumbs.swift`, `Capture.swift`, `Params.swift` |
+| Racks: macros, starting values, `.adg` writer | `Racks.swift`, `RackWriter.swift`, `RackTemplates.swift` |
+| Mini host for VST3 / VST2 (C) | `Sources/CPlugHost/` |
+| Page | `web/index.html`, `web/app.css`, `web/app.js` |
+| Chains: roles, categories, templates, tab | `web/chain-data.js`, `web/chain-famous.js`, `web/chains.js` |
+| Live script | `ableton/PlugShelf/__init__.py`, `ops.py` |
 
-Daten liegen in `~/Library/Application Support/PlugShelf/` (`library.json`, `user.json`, `thumbs/`, `shots.json`, tägliche Backups).
+Data lives in `~/Library/Application Support/PlugShelf/`.
 
-## Noch nicht drin (nächste Schritte)
+## Not in yet
 
-Globale Tastenkürzel und Maus-Ring, kompakte Seitenleiste, MIDI-Bibliothek, Insights, Handy-Remote, Stream Deck.
+Global hotkeys and mouse ring, compact side strip, MIDI library, insights, phone remote, Stream Deck.

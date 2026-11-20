@@ -81,7 +81,7 @@ final class Scanner {
     func scan() -> Library? {
         lock.lock()
         if _progress.running { lock.unlock(); return nil }
-        _progress = Progress(running: true, phase: "Ordner durchsuchen", done: 0, total: 0)
+        _progress = Progress(running: true, phase: "Searching folders", done: 0, total: 0)
         _cancelled = false
         lock.unlock()
         defer { set { $0.running = false; $0.phase = "" } }
@@ -97,10 +97,10 @@ final class Scanner {
         }
         if cancelled { return nil }
 
-        set { $0.phase = "Ableton-Datenbank lesen" }
+        set { $0.phase = "Reading Ableton’s database" }
         let live = LiveDB.load()
 
-        set { $0.phase = "Plugins lesen"; $0.total = bundles.count; $0.done = 0 }
+        set { $0.phase = "Reading plugins"; $0.total = bundles.count; $0.done = 0 }
         let sizeCache = SizeCache(loadSizeCache())
         var results = [[Plugin]](repeating: [], count: bundles.count)
         let resultLock = NSLock()
@@ -115,7 +115,7 @@ final class Scanner {
         if cancelled { return nil }
         saveSizeCache(sizeCache.all)
 
-        set { $0.phase = "Ordnen" }
+        set { $0.phase = "Sorting" }
         var all = results.flatMap { $0 }
         Scanner.resolveFamilies(&all)
         all.sort { ($0.display.lowercased(), $0.format) < ($1.display.lowercased(), $1.format) }
@@ -176,13 +176,13 @@ final class Scanner {
             f.archs = Scanner.archs(of: exe)
             let m = (try? exe.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             f.mtime = (m ?? .distantPast).timeIntervalSince1970 * 1000
-            if f.archs.isEmpty { f.issue = "Programmdatei ist kein Mac-Programm" }
+            if f.archs.isEmpty { f.issue = "The binary is not a Mac program" }
         } else {
-            f.issue = "Programmdatei fehlt"
+            f.issue = "Binary missing"
             let m = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             f.mtime = (m ?? .distantPast).timeIntervalSince1970 * 1000
         }
-        if f.plist.isEmpty && isDir.boolValue && f.issue.isEmpty { f.issue = "Info.plist fehlt" }
+        if f.plist.isEmpty && isDir.boolValue && f.issue.isEmpty { f.issue = "Info.plist missing" }
 
         if let c = cache.get(url.path), c.count == 2, c[0] == f.mtime {
             f.bytes = Int64(c[1])

@@ -4,7 +4,9 @@
 #include "plughost.h"
 
 #include <CoreFoundation/CoreFoundation.h>
+#include <signal.h>
 #include <stdint.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,37 +54,121 @@ typedef struct { void **vt; } HostObj;
 static uint32_t h_addref(void *s) { (void)s; return 1; }
 static uint32_t h_release(void *s) { (void)s; return 1; }
 
-// IAttributeList that accepts everything and knows nothing.
+// IAttributeList: a small key/value store, so plugins can pass data between their two halves
+// (some send pointers or state this way and rely on getting it back).
+typedef struct {
+    char key[128];
+    int type;                  // 1 int, 2 float, 3 string, 4 binary
+    int64_t i;
+    double f;
+    void *data;                // string (UTF-16, 0-terminated) or binary
+    uint32_t size;             // bytes
+} AttrEntry;
+typedef struct { void **vt; int32_t refs; AttrEntry *e; int count, cap; } AttrList;
+
+static AttrEntry *al_slot(AttrList *l, const char *id, int create) {
+    if (!id) return NULL;
+    for (int k = 0; k < l->count; k++) if (strncmp(l->e[k].key, id, sizeof l->e[k].key) == 0) return &l->e[k];
+    if (!create) return NULL;
+    if (l->count == l->cap) {
+        int cap = l->cap ? l->cap * 2 : 8;
+        AttrEntry *n = realloc(l->e, (size_t)cap * sizeof(AttrEntry));
+        if (!n) return NULL;
+        l->e = n; l->cap = cap;
+    }
+    AttrEntry *a = &l->e[l->count++];
+    memset(a, 0, sizeof *a);
+    strncpy(a->key, id, sizeof a->key - 1);
+    return a;
+}
+static void al_clear(AttrEntry *a) { free(a->data); a->data = NULL; a->size = 0; }
+
 static tresult al_qi(void *s, const uint8_t *iid, void **o) {
-    if (same(iid, IID_FUnknown) || same(iid, IID_IAttributeList)) { *o = s; return kResultOk; }
+    if (same(iid, IID_FUnknown) || same(iid, IID_IAttributeList)) { ((AttrList *)s)->refs++; *o = s; return kResultOk; }
     *o = NULL; return kNoInterface;
 }
-static tresult al_setInt(void *s, const char *id, int64_t v) { (void)s; (void)id; (void)v; return kResultOk; }
-static tresult al_getInt(void *s, const char *id, int64_t *v) { (void)s; (void)id; (void)v; return kResultFalse; }
-static tresult al_setFloat(void *s, const char *id, double v) { (void)s; (void)id; (void)v; return kResultOk; }
-static tresult al_getFloat(void *s, const char *id, double *v) { (void)s; (void)id; (void)v; return kResultFalse; }
-static tresult al_setString(void *s, const char *id, const uint16_t *v) { (void)s; (void)id; (void)v; return kResultOk; }
-static tresult al_getString(void *s, const char *id, uint16_t *v, uint32_t n) { (void)s; (void)id; if (v && n >= 2) v[0] = 0; return kResultFalse; }
-static tresult al_setBinary(void *s, const char *id, const void *d, uint32_t n) { (void)s; (void)id; (void)d; (void)n; return kResultOk; }
-static tresult al_getBinary(void *s, const char *id, const void **d, uint32_t *n) { (void)s; (void)id; if (d) *d = NULL; if (n) *n = 0; return kResultFalse; }
-static void *al_vt[] = { al_qi, h_addref, h_release, al_setInt, al_getInt, al_setFloat, al_getFloat, al_setString, al_getString, al_setBinary, al_getBinary };
-static HostObj g_attrs = { al_vt };
+static uint32_t al_addref(void *s) { return (uint32_t)++((AttrList *)s)->refs; }
+static uint32_t al_release(void *s) {
+    AttrList *l = (AttrList *)s;
+    if (--l->refs > 0) return (uint32_t)l->refs;
+    for (int k = 0; k < l->count; k++) free(l->e[k].data);
+    free(l->e); free(l);
+    return 0;
+}
+static tresult al_setInt(void *s, const char *id, int64_t v) {
+    AttrEntry *a = al_slot((AttrList *)s, id, 1); if (!a) return kResultFalse;
+    al_clear(a); a->type = 1; a->i = v; return kResultOk;
+}
+static tresult al_getInt(void *s, const char *id, int64_t *v) {
+    AttrEntry *a = al_slot((AttrList *)s, id, 0);
+    if (!a || a->type != 1 || !v) return kResultFalse;
+    *v = a->i; return kResultOk;
+}
+static tresult al_setFloat(void *s, const char *id, double v) {
+    AttrEntry *a = al_slot((AttrList *)s, id, 1); if (!a) return kResultFalse;
+    al_clear(a); a->type = 2; a->f = v; return kResultOk;
+}
+static tresult al_getFloat(void *s, const char *id, double *v) {
+    AttrEntry *a = al_slot((AttrList *)s, id, 0);
+    if (!a || a->type != 2 || !v) return kResultFalse;
+    *v = a->f; return kResultOk;
+}
+static tresult al_setString(void *s, const char *id, const uint16_t *v) {
+    AttrEntry *a = al_slot((AttrList *)s, id, 1); if (!a) return kResultFalse;
+    al_clear(a); a->type = 3;
+    uint32_t n = 0; if (v) while (v[n]) n++;
+    a->size = (n + 1) * 2; a->data = calloc(n + 1, 2);
+    if (v && a->data) memcpy(a->data, v, (size_t)n * 2);
+    return kResultOk;
+}
+static tresult al_getString(void *s, const char *id, uint16_t *v, uint32_t bytes) {
+    AttrEntry *a = al_slot((AttrList *)s, id, 0);
+    if (!a || a->type != 3 || !v || bytes < 2) return kResultFalse;
+    uint32_t n = a->size < bytes ? a->size : bytes;
+    memcpy(v, a->data, n);
+    v[n / 2 - 1] = 0;
+    return kResultOk;
+}
+static tresult al_setBinary(void *s, const char *id, const void *d, uint32_t n) {
+    AttrEntry *a = al_slot((AttrList *)s, id, 1); if (!a) return kResultFalse;
+    al_clear(a); a->type = 4;
+    a->data = malloc(n ? n : 1); a->size = n;
+    if (d && n && a->data) memcpy(a->data, d, n);
+    return kResultOk;
+}
+static tresult al_getBinary(void *s, const char *id, const void **d, uint32_t *n) {
+    AttrEntry *a = al_slot((AttrList *)s, id, 0);
+    if (!a || a->type != 4 || !d || !n) return kResultFalse;
+    *d = a->data; *n = a->size; return kResultOk;
+}
+static void *al_vt[] = { al_qi, al_addref, al_release, al_setInt, al_getInt, al_setFloat, al_getFloat, al_setString, al_getString, al_setBinary, al_getBinary };
+static AttrList *al_new(void) {
+    AttrList *l = calloc(1, sizeof(AttrList));
+    l->vt = al_vt; l->refs = 1;
+    return l;
+}
 
 // IMessage, for plugins that ask the host for one to talk between their halves.
-typedef struct { void **vt; uint32_t refs; char id[128]; } Message;
+// Laid out like the VST3 SDK's HostMessage (vtable, ref count, char* id, attribute list):
+// some plugins read those fields directly instead of going through the interface.
+typedef struct { void **vt; int32_t refs; char *id; void *attrs; } Message;
 static tresult msg_qi(void *s, const uint8_t *iid, void **o) {
     if (same(iid, IID_FUnknown) || same(iid, IID_IMessage)) { ((Message *)s)->refs++; *o = s; return kResultOk; }
     *o = NULL; return kNoInterface;
 }
-static uint32_t msg_addref(void *s) { return ++((Message *)s)->refs; }
+static uint32_t msg_addref(void *s) { return (uint32_t)++((Message *)s)->refs; }
 static uint32_t msg_release(void *s) {
     Message *m = (Message *)s;
-    if (--m->refs == 0) { free(m); return 0; }
-    return m->refs;
+    if (--m->refs == 0) { free(m->id); if (m->attrs) al_release(m->attrs); free(m); return 0; }
+    return (uint32_t)m->refs;
 }
 static const char *msg_getId(void *s) { return ((Message *)s)->id; }
-static void msg_setId(void *s, const char *id) { Message *m = (Message *)s; strncpy(m->id, id ? id : "", sizeof m->id - 1); }
-static void *msg_attrs(void *s) { (void)s; return &g_attrs; }
+static void msg_setId(void *s, const char *id) {
+    Message *m = (Message *)s;
+    free(m->id);
+    m->id = id ? strdup(id) : NULL;
+}
+static void *msg_attrs(void *s) { return ((Message *)s)->attrs; }   // borrowed, like the SDK's
 static void *msg_vt[] = { msg_qi, msg_addref, msg_release, msg_getId, msg_setId, msg_attrs };
 
 // IHostApplication
@@ -102,10 +188,10 @@ static tresult host_create(void *s, const uint8_t *cid, const uint8_t *iid, void
     (void)s;
     if (same(cid, IID_IMessage) && same(iid, IID_IMessage)) {
         Message *m = calloc(1, sizeof(Message));
-        m->vt = msg_vt; m->refs = 1;
+        m->vt = msg_vt; m->refs = 1; m->attrs = al_new();
         *o = m; return kResultOk;
     }
-    if (same(cid, IID_IAttributeList) && same(iid, IID_IAttributeList)) { *o = &g_attrs; return kResultOk; }
+    if (same(cid, IID_IAttributeList) && same(iid, IID_IAttributeList)) { *o = al_new(); return kResultOk; }
     *o = NULL; return kNotImplemented;
 }
 static void *host_vt[] = { host_qi, h_addref, h_release, host_getName, host_create };
@@ -186,18 +272,20 @@ static void *st_vt[] = { st_qi, h_addref, h_release, st_read, st_write, st_seek,
 typedef struct {
     CFBundleRef bundle;
     void *factory, *component, *controller, *view;
+    Stream *state;          // the component's state, as read at load time
+    PClassInfo info;        // the class that was created
 } V3;
 
 typedef tresult (*f_init)(void *, void *);
 
-void *ph_vst3_load(const char *path, const char *className, char *err, int errLen) {
+void *ph_vst3_load(const char *path, const char *className, int wantView, char *err, int errLen) {
     CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, (CFIndex)strlen(path), true);
     CFBundleRef bundle = url ? CFBundleCreate(NULL, url) : NULL;
     if (url) CFRelease(url);
-    if (!bundle) { seterr(err, errLen, "Bundle nicht lesbar"); return NULL; }
+    if (!bundle) { seterr(err, errLen, "Cannot read the bundle"); return NULL; }
     CFErrorRef cferr = NULL;
     if (!CFBundleLoadExecutableAndReturnError(bundle, &cferr)) {
-        char msg[300] = "Programm lässt sich nicht laden";
+        char msg[300] = "Cannot load the binary";
         if (cferr) {
             CFStringRef d = CFErrorCopyDescription(cferr);
             if (d) { CFStringGetCString(d, msg, sizeof msg, kCFStringEncodingUTF8); CFRelease(d); }
@@ -209,12 +297,12 @@ void *ph_vst3_load(const char *path, const char *className, char *err, int errLe
     typedef unsigned char (*Entry)(CFBundleRef);
     Entry entry = (Entry)CFBundleGetFunctionPointerForName(bundle, CFSTR("bundleEntry"));
     if (!entry) entry = (Entry)CFBundleGetFunctionPointerForName(bundle, CFSTR("BundleEntry"));
-    if (entry && !entry(bundle)) { seterr(err, errLen, "bundleEntry fehlgeschlagen"); return NULL; }
+    if (entry && !entry(bundle)) { seterr(err, errLen, "bundleEntry failed"); return NULL; }
     typedef void *(*GetFactory)(void);
     GetFactory gf = (GetFactory)CFBundleGetFunctionPointerForName(bundle, CFSTR("GetPluginFactory"));
-    if (!gf) { seterr(err, errLen, "kein VST3-Einstiegspunkt"); return NULL; }
+    if (!gf) { seterr(err, errLen, "No VST3 entry point"); return NULL; }
     void *factory = gf();
-    if (!factory) { seterr(err, errLen, "Plugin liefert keine Factory"); return NULL; }
+    if (!factory) { seterr(err, errLen, "The plugin returns no factory"); return NULL; }
 
     int32_t n = ((int32_t (*)(void *))VT(factory)[4])(factory);
     PClassInfo info, pick;
@@ -226,17 +314,17 @@ void *ph_vst3_load(const char *path, const char *className, char *err, int errLe
         if (!found) { pick = info; found = 1; }
         if (className && *className && strncmp(info.name, className, 64) == 0) { pick = info; found = 2; break; }
     }
-    if (!found) { seterr(err, errLen, "keine Audio-Klasse im Plugin"); return NULL; }
+    if (!found) { seterr(err, errLen, "No audio class in the plugin"); return NULL; }
 
     typedef tresult (*f_create)(void *, const uint8_t *, const uint8_t *, void **);
     f_create create = (f_create)VT(factory)[6];
     void *comp = NULL;
     if (create(factory, pick.cid, IID_IComponent, &comp) != kResultOk || !comp) {
-        seterr(err, errLen, "Plugin lässt sich nicht erzeugen");
+        seterr(err, errLen, "Cannot create the plugin");
         return NULL;
     }
     if (((f_init)VT(comp)[3])(comp, &g_host) != kResultOk) {
-        seterr(err, errLen, "Plugin startet nicht (initialize)");
+        seterr(err, errLen, "The plugin does not start (initialize)");
         return NULL;
     }
 
@@ -250,8 +338,9 @@ void *ph_vst3_load(const char *path, const char *className, char *err, int errLe
             else ctrl = NULL;
         }
     }
-    if (!ctrl) { seterr(err, errLen, "Plugin hat keinen Controller"); return NULL; }
+    if (!ctrl) { seterr(err, errLen, "The plugin has no controller"); return NULL; }
 
+    // Link the two halves (some plugins only list their parameters, or draw their editor, once linked).
     if (!single) {
         void *a = NULL, *b = NULL;
         QI(comp, IID_IConnectionPoint, &a);
@@ -270,16 +359,20 @@ void *ph_vst3_load(const char *path, const char *className, char *err, int errLe
     }
     ((tresult (*)(void *, void *))VT(ctrl)[16])(ctrl, &g_handler);                // setComponentHandler
 
-    void *view = ((void *(*)(void *, const char *))VT(ctrl)[17])(ctrl, "editor"); // createView
-    if (!view) { seterr(err, errLen, "Plugin hat kein eigenes Fenster"); return NULL; }
-    if (((tresult (*)(void *, const char *))VT(view)[3])(view, "NSView") != kResultOk) {
-        seterr(err, errLen, "Fenster ist kein Mac-Fenster (NSView)");
-        return NULL;
+    void *view = NULL;
+    if (wantView) {
+        view = ((void *(*)(void *, const char *))VT(ctrl)[17])(ctrl, "editor");     // createView
+        if (!view) { seterr(err, errLen, "The plugin has no editor window"); return NULL; }
+        if (((tresult (*)(void *, const char *))VT(view)[3])(view, "NSView") != kResultOk) {
+            seterr(err, errLen, "The editor is not a Mac view (NSView)");
+            return NULL;
+        }
+        ((tresult (*)(void *, void *))VT(view)[12])(view, &g_frame);               // setFrame
     }
-    ((tresult (*)(void *, void *))VT(view)[12])(view, &g_frame);                   // setFrame
 
     V3 *h = calloc(1, sizeof(V3));
     h->bundle = bundle; h->factory = factory; h->component = comp; h->controller = ctrl; h->view = view;
+    h->state = st; h->info = pick;
     return h;
 }
 
@@ -295,8 +388,131 @@ int ph_vst3_size(void *handle, int *w, int *hgt) {
 int ph_vst3_attach(void *handle, void *nsview, char *err, int errLen) {
     V3 *h = (V3 *)handle;
     if (((tresult (*)(void *, void *, const char *))VT(h->view)[4])(h->view, nsview, "NSView") != kResultOk) {
-        seterr(err, errLen, "Fenster lässt sich nicht öffnen (attached)");
+        seterr(err, errLen, "Cannot open the editor (attached)");
         return 0;
     }
     return 1;
+}
+
+/* ---------------------------------------------------------------- parameters */
+
+typedef struct {
+    uint32_t id;
+    uint16_t title[128], shortTitle[128], units[128];
+    int32_t stepCount;
+    double defaultNormalizedValue;
+    int32_t unitId;
+    int32_t flags;
+} ParameterInfo;
+
+// UTF-16 (with surrogate pairs) to UTF-8.
+static void utf8(const uint16_t *in, int maxIn, char *out, int outLen) {
+    int o = 0;
+    for (int i = 0; i < maxIn && in[i] && o < outLen - 4; i++) {
+        uint32_t c = in[i];
+        if (c >= 0xD800 && c < 0xDC00 && i + 1 < maxIn && in[i + 1] >= 0xDC00 && in[i + 1] < 0xE000) {
+            c = 0x10000 + ((c - 0xD800) << 10) + (in[i + 1] - 0xDC00); i++;
+        }
+        if (c < 0x80) out[o++] = (char)c;
+        else if (c < 0x800) { out[o++] = (char)(0xC0 | (c >> 6)); out[o++] = (char)(0x80 | (c & 63)); }
+        else if (c < 0x10000) { out[o++] = (char)(0xE0 | (c >> 12)); out[o++] = (char)(0x80 | ((c >> 6) & 63)); out[o++] = (char)(0x80 | (c & 63)); }
+        else { out[o++] = (char)(0xF0 | (c >> 18)); out[o++] = (char)(0x80 | ((c >> 12) & 63)); out[o++] = (char)(0x80 | ((c >> 6) & 63)); out[o++] = (char)(0x80 | (c & 63)); }
+    }
+    out[o] = 0;
+}
+
+int ph_vst3_param_count(void *handle) {
+    V3 *h = (V3 *)handle;
+    return ((int32_t (*)(void *))VT(h->controller)[8])(h->controller);
+}
+
+int ph_vst3_param_info(void *handle, int index, unsigned int *id, char *title, int titleLen, char *units, int unitsLen,
+                       double *defaultNorm, int *stepCount, int *flags) {
+    V3 *h = (V3 *)handle;
+    ParameterInfo pi;
+    memset(&pi, 0, sizeof pi);
+    if (((tresult (*)(void *, int32_t, ParameterInfo *))VT(h->controller)[9])(h->controller, index, &pi) != kResultOk) return 0;
+    *id = pi.id;
+    utf8(pi.title, 128, title, titleLen);
+    utf8(pi.units, 128, units, unitsLen);
+    *defaultNorm = pi.defaultNormalizedValue;
+    *stepCount = pi.stepCount;
+    *flags = pi.flags;
+    return 1;
+}
+
+double ph_vst3_param_value(void *handle, unsigned int id) {
+    V3 *h = (V3 *)handle;
+    return ((double (*)(void *, uint32_t))VT(h->controller)[14])(h->controller, id);   // getParamNormalized
+}
+
+double ph_vst3_to_plain(void *handle, unsigned int id, double norm) {
+    V3 *h = (V3 *)handle;
+    return ((double (*)(void *, uint32_t, double))VT(h->controller)[12])(h->controller, id, norm);   // normalizedParamToPlain
+}
+
+void ph_vst3_param_set(void *handle, unsigned int id, double norm) {
+    V3 *h = (V3 *)handle;
+    ((tresult (*)(void *, uint32_t, double))VT(h->controller)[15])(h->controller, id, norm);    // setParamNormalized
+}
+
+int ph_vst3_param_text(void *handle, unsigned int id, double norm, char *out, int outLen) {
+    V3 *h = (V3 *)handle;
+    uint16_t s[128];
+    memset(s, 0, sizeof s);
+    if (((tresult (*)(void *, uint32_t, double, uint16_t *))VT(h->controller)[10])(h->controller, id, norm, s) != kResultOk) {
+        if (outLen > 0) out[0] = 0;
+        return 0;
+    }
+    utf8(s, 128, out, outLen);
+    return 1;
+}
+
+void ph_vst3_class(void *handle, unsigned char *cid16, char *name, int nameLen) {
+    V3 *h = (V3 *)handle;
+    memcpy(cid16, h->info.cid, 16);
+    strncpy(name, h->info.name, (size_t)nameLen - 1);
+    name[nameLen - 1] = 0;
+}
+
+int ph_vst3_states(void *handle, unsigned char **proc, int *procLen, unsigned char **ctrl, int *ctrlLen) {
+    V3 *h = (V3 *)handle;
+    *proc = NULL; *procLen = 0; *ctrl = NULL; *ctrlLen = 0;
+    if (h->state && h->state->size > 0) {
+        *proc = malloc((size_t)h->state->size);
+        memcpy(*proc, h->state->data, (size_t)h->state->size);
+        *procLen = (int)h->state->size;
+    }
+    Stream *cs = calloc(1, sizeof(Stream));
+    cs->vt = st_vt;
+    if (((tresult (*)(void *, void *))VT(h->controller)[7])(h->controller, cs) == kResultOk && cs->size > 0) {  // IEditController::getState
+        *ctrl = cs->data;
+        *ctrlLen = (int)cs->size;
+    } else {
+        free(cs->data);
+    }
+    free(cs);
+    return 1;
+}
+
+/* ---------------------------------------------------------------- crash guard */
+
+static void on_crash(int sig) {
+    (void)sig;
+    static const char msg[] = "\nPLUGSHELF-ERR The plugin crashed while loading\n";
+    write(1, msg, sizeof msg - 1);
+    _exit(3);
+}
+
+void ph_install_crash_guard(void) {
+    static char altstack[64 * 1024];
+    stack_t ss = { .ss_sp = altstack, .ss_size = sizeof altstack, .ss_flags = 0 };
+    sigaltstack(&ss, NULL);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_crash;
+    sa.sa_flags = SA_ONSTACK;
+    sigemptyset(&sa.sa_mask);
+    int sigs[] = { SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP };
+    for (unsigned i = 0; i < sizeof sigs / sizeof sigs[0]; i++) sigaction(sigs[i], &sa, NULL);
 }

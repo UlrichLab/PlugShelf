@@ -8,10 +8,10 @@ enum Ableton {
 
     static func send(_ msg: [String: Any], timeout: Double = 2.0) -> [String: Any] {
         guard let payload = try? JSONSerialization.data(withJSONObject: msg) else {
-            return ["ok": false, "msg": "Interner Fehler"]
+            return ["ok": false, "msg": "Internal error"]
         }
         let s = socket(AF_INET, SOCK_DGRAM, 0)
-        guard s >= 0 else { return ["ok": false, "msg": "Kein Socket"] }
+        guard s >= 0 else { return ["ok": false, "msg": "No socket"] }
         defer { close(s) }
         var tv = timeval(tv_sec: Int(timeout), tv_usec: Int32((timeout - floor(timeout)) * 1_000_000))
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
@@ -27,16 +27,16 @@ enum Ableton {
                 }
             }
         }
-        guard sent == payload.count else { return ["ok": false, "msg": "Senden fehlgeschlagen"] }
+        guard sent == payload.count else { return ["ok": false, "msg": "Sending failed"] }
 
         var buf = [UInt8](repeating: 0, count: 65536)
         let n = recv(s, &buf, buf.count, 0)
         guard n > 0 else {
             return ["ok": false, "offline": true,
-                    "msg": "Ableton antwortet nicht. Läuft Live, und ist PlugShelf als Control Surface gewählt?"]
+                    "msg": "Ableton does not answer. Is Live running, with PlugShelf chosen as a control surface?"]
         }
         let reply = (try? JSONSerialization.jsonObject(with: Data(buf[0..<n]))) as? [String: Any]
-        return reply ?? ["ok": false, "msg": "Unlesbare Antwort von Live"]
+        return reply ?? ["ok": false, "msg": "Unreadable answer from Live"]
     }
 
     // MARK: User Library and the script
@@ -68,36 +68,51 @@ enum Ableton {
         userLibrary()?.appendingPathComponent("Remote Scripts").appendingPathComponent(scriptFolder)
     }
 
+    /// The script's files as shipped with the app.
+    static func scriptFiles() -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: Paths.abletonScript.path)) ?? [])
+            .filter { $0.hasSuffix(".py") }.sorted()
+    }
+
     static func scriptStatus() -> [String: Any] {
-        let bundled = (try? String(contentsOf: Paths.abletonScript.appendingPathComponent("__init__.py"), encoding: .utf8)) ?? ""
         guard let target = scriptTarget() else {
             return ["userLibrary": NSNull(), "installed": false, "current": false]
         }
-        let installed = (try? String(contentsOf: target.appendingPathComponent("__init__.py"), encoding: .utf8))
+        let files = scriptFiles()
+        let installed = FileManager.default.fileExists(atPath: target.appendingPathComponent("__init__.py").path)
+        let current = installed && files.allSatisfy { f in
+            let a = try? Data(contentsOf: Paths.abletonScript.appendingPathComponent(f))
+            let b = try? Data(contentsOf: target.appendingPathComponent(f))
+            return a != nil && a == b
+        }
         return [
             "userLibrary": target.deletingLastPathComponent().deletingLastPathComponent().path,
             "target": target.path,
-            "installed": installed != nil,
-            "current": installed != nil && installed == bundled,
+            "installed": installed,
+            "current": current,
         ]
     }
 
     static func installScript() -> [String: Any] {
         guard let target = scriptTarget() else {
-            return ["ok": false, "msg": "Keine Ableton User Library gefunden"]
+            return ["ok": false, "msg": "No Ableton User Library found"]
         }
         let fm = FileManager.default
         do {
             try fm.createDirectory(at: target, withIntermediateDirectories: true)
-            let src = Paths.abletonScript.appendingPathComponent("__init__.py")
-            let dst = target.appendingPathComponent("__init__.py")
-            if fm.fileExists(atPath: dst.path) { try fm.removeItem(at: dst) }
-            try fm.copyItem(at: src, to: dst)
+            for f in scriptFiles() {
+                let dst = target.appendingPathComponent(f)
+                if fm.fileExists(atPath: dst.path) { try fm.removeItem(at: dst) }
+                try fm.copyItem(at: Paths.abletonScript.appendingPathComponent(f), to: dst)
+            }
             // Live keeps compiled copies; drop them so the new script is used.
             try? fm.removeItem(at: target.appendingPathComponent("__pycache__"))
-            return ["ok": true, "msg": "Script installiert in \(target.path)"]
+            // A running Live with a reload-capable script picks the new commands up at once.
+            let r = send(["op": "reload"], timeout: 1.0)
+            let live = r["ok"] as? Bool == true ? " Live picked it up right away." : ""
+            return ["ok": true, "msg": "Script installed in \(target.path).\(live)"]
         } catch {
-            return ["ok": false, "msg": "Konnte das Script nicht kopieren: \(error.localizedDescription)"]
+            return ["ok": false, "msg": "Could not copy the script: \(error.localizedDescription)"]
         }
     }
 }
