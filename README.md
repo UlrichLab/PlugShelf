@@ -1,92 +1,93 @@
 # PlugShelf
 
-A plugin library for the Mac that loads plugins, signal chains and Ableton racks straight into Ableton Live.
-An independent rebuild of the core of RONE VST MANAGER, plus a chain builder of its own.
+PlugShelf is a macOS plugin manager and chain builder for Ableton Live. It finds installed audio plugins,
+organizes them in a searchable library, loads plugins onto Live's selected track, and creates effect,
+mix-bus, mastering, and famous-recording chains.
 
 <p>
-  <a href="docs/screenshots/library.webp"><img src="docs/screenshots/library.webp" width="32%" alt="Library"></a>
-  <a href="docs/screenshots/chains.webp"><img src="docs/screenshots/chains.webp" width="32%" alt="Chains"></a>
-  <a href="docs/screenshots/health.webp"><img src="docs/screenshots/health.webp" width="32%" alt="Health"></a>
+  <a href="docs/screenshots/library.webp"><img src="docs/screenshots/library.webp" width="32%" alt="Plugin library"></a>
+  <a href="docs/screenshots/chains.webp"><img src="docs/screenshots/chains.webp" width="32%" alt="Chain builder"></a>
+  <a href="docs/screenshots/health.webp"><img src="docs/screenshots/health.webp" width="32%" alt="Plugin health view"></a>
 </p>
+
+## Download and install (for users)
+
+**You do not need Swift, Xcode, Python, Node.js, Homebrew, or any other developer tool.**
+
+### Requirements
+
+| Required | Details |
+| --- | --- |
+| macOS | macOS 13 Ventura or later |
+| Mac | Apple Silicon and Intel are supported |
+| Ableton Live | Required for loading plugins and racks into a track; the library and chain browser can open without Live |
+| Audio plugins | PlugShelf manages plugins already installed on the Mac; it does not include commercial plugins |
+
+### Install the ready-to-run app
+
+1. Open the [latest release](../../releases/latest) and download **`PlugShelf-…-mac.zip`** under **Assets**.
+   Do **not** use GitHub's **Code → Download ZIP** button; that downloads source code for developers.
+2. Double-click the downloaded ZIP file.
+3. Drag **PlugShelf.app** into the **Applications** folder.
+4. Open PlugShelf.
+
+PlugShelf is not yet notarized by Apple, so macOS requires one manual confirmation on first launch:
+
+- **macOS 15 Sequoia or later:** click **Done**, then open **System Settings → Privacy & Security**, scroll
+  down, click **Open Anyway** next to PlugShelf, and confirm.
+- **macOS 13–14:** Control-click or right-click PlugShelf in Applications, choose **Open**, then **Open** again.
+
+If macOS reports that the app is damaged, open Terminal and run this once:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/PlugShelf.app
+```
+
+### Connect Ableton Live
+
+1. Open PlugShelf and go to **Setup → Install script**.
+2. Restart Live once.
+3. In Live, open **Settings → Link, Tempo & MIDI** and select **PlugShelf** as a Control Surface.
+   Leave Input and Output set to **None**.
+4. Return to PlugShelf and choose **Test connection**. The indicator should turn green.
+
+The small Python control-surface script runs inside Ableton Live's own environment. Users do not install or
+configure Python themselves.
 
 ## Features
 
-- **Library** – finds every installed plugin (VST3, AU, VST2, CLAP, AAX) and shows one tile per plugin with a
-  picture of its editor. Search, categories, makers, formats, favourites, collections, racks, recently loaded.
-  One click (or Enter) loads a plugin onto Live's selected track.
-- **Only what runs** – uses versions that run natively on this Mac and that Live accepts (no Intel-only files on
-  Apple Silicon, no AAX, nothing Live's own scan rejected), VST3 first.
-- **Plugin pictures** – PlugShelf opens each plugin briefly in its own mini host (VST3, VST2, AU) and captures the
-  editor; each capture runs in a separate process, so a crashing plugin never takes the app down.
-- **Chains** – 167 signal-chain templates in 12 categories and 6 genres: vocals, drums, bass, mix bus, mastering,
-  UAD/Apollo chains, dub techno, and 100 **Famous Chains** of well-known records, engineers and mastering rooms
-  (e.g. "Michael Jackson – Thriller": Neve 1084 → 1176). A slot that names hardware takes your emulation of it,
-  otherwise a comparable plugin marked "Stand-in". Two dice: *Roll plugins* swaps plugins within their role,
-  *New chain* builds a new layout.
-- **Ableton racks** – a chain becomes an Audio Effect Rack (`.adg`) with named macros: the settings a chain leaves
-  to taste first, every compressor/limiter/clipper threshold always, documented values as starting points.
-  Saved to the User Library or loaded straight onto the selected track.
-- **Health** – disk use, VST2 copies next to a VST3, AAX without Pro Tools, Intel-only, broken bundles, Live scan
-  failures. Nothing is deleted; "Finder" shows the file.
+- **Plugin library** – finds installed VST3, AU, VST2, CLAP, and AAX plugins and shows one tile per plugin.
+  Search by name, category, maker, format, favourites, collections, racks, or recently loaded plugins.
+- **Only what runs** – prefers formats that run natively on the current Mac and that Live accepts: VST3 first,
+  no Intel-only plugins on Apple Silicon, no AAX in Live, and no plugins rejected by Live's scan.
+- **Plugin pictures** – opens supported plugin editors briefly in isolated helper processes and captures a
+  thumbnail. A crashing plugin does not take down the main app.
+- **Chains** – includes 167 templates in 12 categories and 6 genres: vocals, drums, bass, mix bus, mastering,
+  UAD/Apollo chains, dub techno, and 100 Famous Chains based on well-known records, engineers, and mastering
+  rooms. Hardware names are matched to an installed emulation or a comparable stand-in.
+- **Ableton racks** – turns a chain into an Audio Effect Rack (`.adg`) with named macros and starting values,
+  saves it in the User Library, and can load it onto the selected track.
+- **Plugin health** – reports disk use, redundant VST2/VST3 installs, AAX without Pro Tools, Intel-only and
+  broken bundles, and Live scan failures. PlugShelf does not delete plugin files.
 
-## Install (no Swift needed)
+PlugShelf stores its user data in `~/Library/Application Support/PlugShelf/`.
 
-1. Download **`PlugShelf-…-mac.zip`** from the latest [release](../../releases/latest) and double-click it.
-2. Drag **PlugShelf.app** into your **Applications** folder.
-3. Open it. The first time, macOS says it "cannot verify" the app, because it is not notarized by Apple:
-   - **macOS 15 Sequoia and later:** click *Done*, open **System Settings → Privacy & Security**, scroll down
-     and click **Open Anyway** next to PlugShelf, then confirm.
-   - **macOS 13–14:** right-click PlugShelf in Applications → **Open** → **Open**.
+## For developers
 
-   This is needed only once. If macOS says the app is "damaged", run this in Terminal once:
-   ```bash
-   xattr -dr com.apple.quarantine /Applications/PlugShelf.app
-   ```
-4. PlugShelf scans your plugins on the first start. Then connect Live (see below).
+Building from source requires the Swift toolchain. Normal users do not build the app and can ignore all source
+folders in this repository.
 
-Runs on macOS 13 or later, Apple Silicon and Intel.
+See **[DEVELOPMENT.md](DEVELOPMENT.md)** for prerequisites, build commands, release verification, signing, and
+the source layout.
 
-## Build from source
-
-```bash
-./scripts/build.sh
-ditto --noextattr build/PlugShelf.app /Applications/PlugShelf.app
-```
-
-`build.sh` builds a universal app (Apple Silicon + Intel). It signs with your Apple Development / Developer ID
-certificate if there is one, so macOS keeps privacy permissions across builds, otherwise ad hoc. It signs in a
-temp folder because iCloud Drive stamps Finder info onto bundles, which codesign refuses.
-
-Development without the window (page at http://127.0.0.1:47900/):
-
-```bash
-swift build -c release && .build/release/PlugShelf --headless
-```
-
-## Connect Ableton Live
-
-1. PlugShelf → **Setup** → **Install script** (copies `ableton/PlugShelf` to `<User Library>/Remote Scripts`).
-2. Restart Live once, then Settings → Link, Tempo & MIDI → Control Surface → **PlugShelf** (input/output: None).
-3. **Test connection** – the indicator turns green.
-
-The script listens on UDP `127.0.0.1:47812`; script updates reach a running Live without a restart.
-
-## Layout
-
-| Part | Files |
-| --- | --- |
-| App, window, local HTTP server, API | `Sources/PlugShelf/main.swift`, `HTTPServer.swift`, `API.swift` |
-| Scanner, names and categories, Live's plugin database | `Scanner.swift`, `Classify.swift`, `LiveDB.swift` |
-| Live connection, user data | `Ableton.swift`, `Store.swift` |
-| Pictures, plugin parameters (helper processes) | `Thumbs.swift`, `Capture.swift`, `Params.swift` |
-| Racks: macros, starting values, `.adg` writer | `Racks.swift`, `RackWriter.swift`, `RackTemplates.swift` |
-| Mini host for VST3 / VST2 (C) | `Sources/CPlugHost/` |
-| Page | `web/index.html`, `web/app.css`, `web/app.js` |
-| Chains: roles, categories, templates, tab | `web/chain-data.js`, `web/chain-famous.js`, `web/chains.js` |
-| Live script | `ableton/PlugShelf/__init__.py`, `ops.py` |
-
-Data lives in `~/Library/Application Support/PlugShelf/`.
+| Repository path | Audience | Purpose |
+| --- | --- | --- |
+| `Sources/`, `Package.swift` | Developers | Swift and C application source |
+| `web/` | Developers | Web interface bundled into the finished app |
+| `ableton/` | Developers | Control-surface source bundled into the app and installed from **Setup** |
+| `scripts/` | Developers/release maintainers | Build and release-verification tools |
+| `docs/` | Documentation | Screenshots and other documentation assets |
 
 ## Not in yet
 
-Global hotkeys and mouse ring, compact side strip, MIDI library, insights, phone remote, Stream Deck.
+Global hotkeys and mouse ring, compact side strip, MIDI library, insights, phone remote, and Stream Deck support.
