@@ -29,7 +29,24 @@ An independent rebuild of the core of RONE VST MANAGER, plus a chain builder of 
 - **Health** – disk use, VST2 copies next to a VST3, AAX without Pro Tools, Intel-only, broken bundles, Live scan
   failures. Nothing is deleted; "Finder" shows the file.
 
-## Build and run
+## Install (no Swift needed)
+
+1. Download **`PlugShelf-…-mac.zip`** from the latest [release](../../releases/latest) and double-click it.
+2. Drag **PlugShelf.app** into your **Applications** folder.
+3. Open it. The first time, macOS says it "cannot verify" the app, because it is not notarized by Apple:
+   - **macOS 15 Sequoia and later:** click *Done*, open **System Settings → Privacy & Security**, scroll down
+     and click **Open Anyway** next to PlugShelf, then confirm.
+   - **macOS 13–14:** right-click PlugShelf in Applications → **Open** → **Open**.
+
+   This is needed only once. If macOS says the app is "damaged", run this in Terminal once:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/PlugShelf.app
+   ```
+4. PlugShelf scans your plugins on the first start. Then connect Live (see below).
+
+Runs on macOS 13 or later, Apple Silicon and Intel.
+
+## Build from source
 
 ```bash
 ./scripts/build.sh
