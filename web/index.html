@@ -19,6 +19,7 @@
     <button class="daw" id="daw" title="Verbindung zu Ableton Live"><i></i><span>Live nicht verbunden</span></button>
     <nav class="tabs" id="tabs">
       <button data-v="lib" class="on">Bibliothek <em id="tLib">0</em></button>
+      <button data-v="chains">Chains</button>
       <button data-v="health">Health <em id="tHealth">–</em></button>
       <button data-v="setup">Setup</button>
     </nav>
@@ -56,6 +57,7 @@
     <aside class="drawer" id="drawer" hidden></aside>
   </section>
 
+  <section class="view" id="v-chains" hidden><div class="page wide" id="chains"></div></section>
   <section class="view" id="v-health" hidden><div class="page" id="health"></div></section>
   <section class="view" id="v-setup" hidden><div class="page" id="setup"></div></section>
 
@@ -64,5 +66,7 @@
   <div class="toasts" id="toasts"></div>
 </div>
 <script src="app.js"></script>
+<script src="chain-data.js"></script>
+<script src="chains.js"></script>
 </body>
 </html>

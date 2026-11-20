@@ -870,8 +870,9 @@ function confirmDlg(title, text, yes = 'Löschen') {
 function show(v) {
   S.view = v;
   $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
-  for (const id of ['lib', 'health', 'setup']) $('#v-' + id).hidden = id !== v;
+  for (const id of ['lib', 'chains', 'health', 'setup']) $('#v-' + id).hidden = id !== v;
   if (v === 'lib') renderLib();
+  if (v === 'chains') renderChains();
   if (v === 'health') renderHealth();
   if (v === 'setup') { renderSetup(); Promise.all([refreshScript(), refreshRone()]).then(() => S.view === 'setup' && renderSetup()); }
 }

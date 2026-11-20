@@ -40,6 +40,13 @@ Das Script hört auf UDP `127.0.0.1:47812` und läuft problemlos neben dem RONE-
   Favoriten, eigene Sammlungen, „Zuletzt geladen“, „Neu installiert“, Ausblenden, Notizen,
   Kategorie-Korrektur pro Plugin, Kachelgröße.
 - **Racks**: Ketten aus mehreren Plugins, per Drag & Drop sortierbar, laden in Reihenfolge auf eine Spur.
+- **Chains**: typische Signalketten aus deinen Plugins, in 10 Rubriken (Vocals, Drums, Bass, Percussion,
+  Instrumental, Trance & Leads, Modulation & FX, Send-Effekte, Mixbus, Mastering) mit 36 Vorlagen, z. B. ein
+  Vocal-Strip im Apollo-/Unison-Stil oder ein Trance-Supersaw-Lead. Zwei Würfel: **Plugins würfeln** behält die
+  Module (Kompressor bleibt Kompressor, Hall bleibt Hall) und tauscht jedes gegen ein anderes Plugin seiner Art;
+  **Neue Chain** baut einen neuen Aufbau aus der gewählten Rubrik. Module sperren, einzeln würfeln, von Hand
+  wählen, verschieben, hinzufügen; als Rack speichern oder direkt in Live laden. Plugins, die zum Stil eines
+  Moduls passen (z. B. 1176-Typ für „Kompressor – schnell“), werden meist bevorzugt.
 - **Health**: Gesamtgröße, VST2-Kopien neben VST3, AAX ohne Pro Tools, nur Intel, defekte Bundles,
   Fehler beim Live-Scan, noch nicht in Live gescannt, größte Plugins. Nichts wird gelöscht – nur „Im Finder zeigen“.
 - **Plugin-Bilder**: PlugShelf öffnet jedes Plugin kurz in einem kleinen Fenster unten rechts und fotografiert
@@ -65,6 +72,7 @@ Das Script hört auf UDP `127.0.0.1:47812` und läuft problemlos neben dem RONE-
 | Bilder: Aufnahme-Prozess (`--capture`), AU | `Sources/PlugShelf/Capture.swift` |
 | Mini-Host für VST3 / VST2 (C) | `Sources/CPlugHost/` |
 | Oberfläche | `web/index.html`, `web/app.css`, `web/app.js` |
+| Chains: Rollen, Rubriken, Vorlagen / Tab | `web/chain-data.js`, `web/chains.js` |
 | Live-Script | `ableton/PlugShelf/__init__.py` |
 
 Daten liegen in `~/Library/Application Support/PlugShelf/` (`library.json`, `user.json`, `thumbs/`, `shots.json`, tägliche Backups).
