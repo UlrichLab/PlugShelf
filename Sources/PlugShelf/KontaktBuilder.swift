@@ -15,6 +15,11 @@ enum KontaktBuilder {
     static var setFile: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Music/Ableton/Kontakt Preset Builder/Kontakt Preset Builder.als")
     }
+    /// A path as "~/…" for showing on screen, so no user name appears.
+    static func shown(_ u: URL) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return u.path.hasPrefix(home + "/") ? "~" + u.path.dropFirst(home.count) : u.path
+    }
     private static let stateFile = Paths.support.appendingPathComponent("kontakt-builder.json")
     private static let infoXML = "<?xml version='1.0' encoding='utf-8'?>\n<MetaInfo><Attribute id='MediaType' value='VstPreset' type='string' flags='writeProtected'></Attribute><Attribute id='PlugInCategory' value='Instrument' type='string' flags='writeProtected'></Attribute><Attribute id='plugtype' value='Instrument' type='string' flags='writeProtected'></Attribute><Attribute id='PlugInName' value='Kontakt 8' type='string' flags='writeProtected'></Attribute><Attribute id='plugname' value='Kontakt 8' type='string' flags='writeProtected'></Attribute><Attribute id='PlugInVendor' value='Native Instruments' type='string' flags='writeProtected'></Attribute></MetaInfo>"
     private static let kontakt8ClassId = "5653544E694B386B6F6E74616B742038"
@@ -117,7 +122,7 @@ enum KontaktBuilder {
     /// Reads the saved builder set and writes one preset per "KP · …" track that has a loaded Kontakt.
     static func harvest() -> [String: Any] {
         guard let raw = try? Data(contentsOf: setFile) else {
-            return ["ok": false, "msg": "No saved set at \(setFile.path) – save the builder set there first (Cmd+Shift+S once, then Cmd+S)."]
+            return ["ok": false, "msg": "No saved set at \(shown(setFile)) – save the builder set there first (Cmd+Shift+S once, then Cmd+S)."]
         }
         guard let xmlData = gunzip(raw), let xml = String(data: xmlData, encoding: .utf8) else { return ["ok": false, "msg": "Cannot read the set file"] }
         guard let lib = Ableton.userLibrary() else { return ["ok": false, "msg": "No Ableton User Library found"] }
@@ -135,7 +140,7 @@ enum KontaktBuilder {
             let file = folder.appendingPathComponent(presetName + ".vstpreset")
             if (try? vstpreset(comp).write(to: file, options: .atomic)) != nil { written.append(presetName) }
         }
-        return ["ok": true, "written": written, "empty": empty, "folder": folder.path]
+        return ["ok": true, "written": written, "empty": empty, "folder": shown(folder)]
     }
 
     private static func match(_ s: String, _ pattern: String) -> String? {

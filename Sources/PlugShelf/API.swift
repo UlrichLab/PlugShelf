@@ -61,7 +61,7 @@ final class API {
             let libs = kontaktLibraries(refresh: true)
             let plan = KontaktBuilder.plan(libraries: libs, presets: Kontakt.presets(libraries: libs))
             return .json(["ok": true, "remaining": plan.count, "next": Array(plan.prefix(KontaktBuilder.blockSize)),
-                          "setFile": KontaktBuilder.setFile.path, "skipped": KontaktBuilder.skipped()])
+                          "setFile": KontaktBuilder.shown(KontaktBuilder.setFile), "skipped": KontaktBuilder.skipped()])
         case ("POST", "/api/kontakt/block"):
             let libs = kontaktLibraries(refresh: true)
             let next = Array(KontaktBuilder.plan(libraries: libs, presets: Kontakt.presets(libraries: libs)).prefix(KontaktBuilder.blockSize))
