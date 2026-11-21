@@ -379,3 +379,14 @@ details.fails li span { color: var(--dim); }
 .rackprog::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 8px; border: 2px solid var(--accent); border-right-color: transparent; border-radius: 50%; vertical-align: -1px; animation: spin .8s linear infinite; }
 .cs-set { display: flex; flex-wrap: wrap; gap: 4px; }
 .cs-set span { font: 600 10px var(--mono); color: var(--tx2); background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+
+/* group heading in the UAD view: spans the whole grid row */
+#grid .grp { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin: 14px 0 2px; font: 700 11px -apple-system, system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--tx2); }
+#grid .grp:first-child { margin-top: 0; }
+#grid .grp .dot { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--h) 70% 60%); }
+#grid .grp span { color: var(--dim); font-weight: 600; }
+
+#grid .knote { grid-column: 1 / -1; color: var(--tx2); font-size: 12.5px; line-height: 1.45; margin: -4px 0 4px; }
+
+.box.wide { grid-column: 1 / -1; }
+.kblist { margin: 6px 0 0; padding-left: 22px; display: grid; gap: 6px; font-size: 13px; }

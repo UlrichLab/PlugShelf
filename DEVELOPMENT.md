@@ -64,9 +64,11 @@ Ableton Live versions and third-party plugins.
 | Live connection and user data | `Ableton.swift`, `Store.swift` |
 | Plugin pictures and parameters | `Thumbs.swift`, `Capture.swift`, `Params.swift` |
 | Rack macros, starting values, `.adg` writer | `Racks.swift`, `RackWriter.swift`, `RackTemplates.swift` |
+| Kontakt libraries, presets, preset builder | `Kontakt.swift`, `KontaktBuilder.swift`, `web/kontakt.js` |
+| iPad / iPhone remote (pairing, second server) | `Remote.swift`, `web/remote/` |
 | VST3 and VST2 mini host | `Sources/CPlugHost/` |
 | User interface | `web/` |
-| Chain roles, categories, and templates | `web/chain-data.js`, `web/chain-famous.js`, `web/chains.js` |
+| Chain roles, categories, and templates | `web/chain-data.js`, `web/chain-famous.js`, `web/chain-ua.js`, `web/chains.js` |
 | Ableton Live control surface | `ableton/PlugShelf/` |
 | Build and verification tools | `scripts/` |
 

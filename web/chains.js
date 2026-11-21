@@ -8,6 +8,13 @@ const C = { rubric: 'all', chain: null, history: [], building: false, buildText:
 // Ableton rack export (.adg with macros). The format follows a rack Live 12.4 saved itself;
 // set to false to fall back to loading the chain's plugins one by one.
 const RACK_EXPORT = true;
+
+// UA Console's channel-strip presets on this Mac become chains under "UAD Chains" (see chain-ua.js).
+api.get('/api/uapresets').then(list => {
+  uaRegister(list);
+  roleCache = null;
+  if (S.view === 'chains') renderChains();
+}).catch(() => {});
 let roleCache = null;
 
 const DICE = '<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><circle cx="8.5" cy="8.5" r="1.3" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.3" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.3" fill="currentColor"/></svg>';
@@ -268,7 +275,8 @@ function renderChains(animate = false) {
   el.innerHTML = `
   <div class="chainhead">
     <div class="rubricrows">
-      <div class="chips rubrics">${CHAIN_RUBRICS.filter(r => r.group !== 'genre').map(rubricChip).join('')}</div>
+      <div class="chips rubrics">${CHAIN_RUBRICS.filter(r => !r.group).map(rubricChip).join('')}</div>
+      ${C.rubric === 'uad' || C.rubric.startsWith('ua-') ? `<div class="chips rubrics genres"><span class="rlabel">UA Console</span>${CHAIN_RUBRICS.filter(r => r.group === 'ua').map(rubricChip).join('') || '<span class="rlabel">no presets found</span>'}</div>` : ''}
       <div class="chips rubrics genres"><span class="rlabel">Genre</span>${CHAIN_RUBRICS.filter(r => r.group === 'genre').map(rubricChip).join('')}</div>
     </div>
     <div class="dice">

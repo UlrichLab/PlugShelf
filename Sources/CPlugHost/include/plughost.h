@@ -38,6 +38,8 @@ int ph_vst3_param_text(void *handle, unsigned int id, double norm, char *out, in
 void ph_vst3_class(void *handle, unsigned char *cid16, char *name, int nameLen);
 // Component (processor) and controller state as Live stores them. Caller frees with free().
 int ph_vst3_states(void *handle, unsigned char **proc, int *procLen, unsigned char **ctrl, int *ctrlLen);
+int ph_vst3_set_state(void *handle, const unsigned char *data, int len);
+int ph_vst3_get_state(void *handle, unsigned char **out, int *outLen);
 
 // VST2: loads the bundle and opens the plugin. Shell plugins are not supported.
 void *ph_vst2_load(const char *bundlePath, char *err, int errLen);

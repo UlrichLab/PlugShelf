@@ -86,6 +86,18 @@ final class UserStore {
         save()
     }
 
+    /// Adds or removes one favourite (used by the iPad remote, which never writes the whole document).
+    func setFav(_ key: String, _ on: Bool) -> [String] {
+        lock.lock()
+        var favs = doc["favs"] as? [String] ?? []
+        favs.removeAll { $0 == key }
+        if on { favs.append(key) }
+        doc["favs"] = favs
+        lock.unlock()
+        save()
+        return favs
+    }
+
     /// Counts one load of a plugin family. Returns the new count and timestamp.
     func recordUse(_ family: String) -> (Int, Double) {
         lock.lock()

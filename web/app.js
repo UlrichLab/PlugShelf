@@ -162,6 +162,8 @@ function pickItem(f, format, name) {
 }
 
 /* ---------- filtering ---------- */
+/** Universal Audio plugins: UAD (Apollo DSP) and UADx (native), plus UA's own console/strip plugins. */
+const isUAD = f => /universal audio/i.test(f.vendor || '');
 function passes(f, skip = '') {
   const F = S.f, u = S.user;
   if (!showable(f)) return false;
@@ -170,6 +172,7 @@ function passes(f, skip = '') {
   if (F.coll === 'favs' && !u.favs.includes(f.key)) return false;
   if (F.coll === 'recent' && !u.lastUsed[f.key]) return false;
   if (F.coll === 'new' && f.mtime < Date.now() - 30 * 864e5) return false;
+  if (F.coll === 'uad' && !isUAD(f)) return false;
   if (F.coll?.startsWith('c:')) {
     const c = u.collections.find(x => x.id === F.coll.slice(2));
     if (!c || !c.items.includes(f.key)) return false;
@@ -266,7 +269,14 @@ function renderLib() {
     return;
   }
   renderSide();
-  const list = sorted(S.fams.filter(f => passes(f)));
+  if (typeof isKontaktView === 'function' && isKontaktView()) { renderKontakt(); renderBanner(); return; }
+  let list = sorted(S.fams.filter(f => passes(f)));
+  // UAD view: grouped by category, in the sidebar's category order, then by name
+  const grouped = S.f.coll === 'uad' && !S.f.q && !S.f.cat;
+  if (grouped) {
+    const order = Object.keys(CATS);
+    list = [...list].sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category) || a.name.localeCompare(b.name));
+  }
   S.list = list;
   if (S.sel >= list.length) S.sel = Math.max(0, list.length - 1);
 
@@ -275,6 +285,7 @@ function renderLib() {
   if (F.coll === 'favs') title = 'Favourites';
   else if (F.coll === 'recent') title = 'Recently loaded';
   else if (F.coll === 'new') title = 'Newly installed (30 days)';
+  else if (F.coll === 'uad') title = 'UAD Plugins';
   else if (F.coll === 'hidden') title = 'Hidden';
   else if (F.coll?.startsWith('c:')) title = S.user.collections.find(x => x.id === F.coll.slice(2))?.name || 'Collection';
   const sub = [F.cat && cat(F.cat).label, F.maker].filter(Boolean);
@@ -294,7 +305,11 @@ function renderLib() {
   $('#shelfWrap').hidden = !(plain && top.length >= 3);
   if (!$('#shelfWrap').hidden) $('#shelf').innerHTML = top.map(f => cardHTML(f, -1)).join('');
 
-  $('#grid').innerHTML = list.map((f, i) => cardHTML(f, i)).join('');
+  $('#grid').innerHTML = list.map((f, i) => {
+    const head = grouped && (i === 0 || list[i - 1].category !== f.category)
+      ? `<div class="grp" style="--h:${cat(f.category).hue}"><i class="dot"></i>${esc(cat(f.category).label)}<span>${list.filter(x => x.category === f.category).length}</span></div>` : '';
+    return head + cardHTML(f, i);
+  }).join('');
   if (!list.length) {
     if (F.q) showEmpty(`<h3>Nothing found for “${esc(F.q)}”</h3><p>Try another spelling, or clear the filters in the sidebar.</p>`);
     else if (F.coll === 'favs') showEmpty('<h3>No favourites yet</h3><p>Hover a tile and click ☆ – or drag it onto “Favourites”.</p>');
@@ -325,9 +340,13 @@ function renderSide() {
     ${it('favs', 'Favourites', u.favs.filter(k => S.famBy.has(k)).length, svg('<path d="m12 3 2.6 5.5 6 .8-4.4 4.1 1.1 6L12 16.5l-5.3 2.9 1.1-6-4.4-4.1 6-.8z"/>'), 'data-drop="favs"')}
     ${it('recent', 'Recently loaded', Object.keys(u.lastUsed).filter(k => S.famBy.has(k)).length, svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'))}
     ${newCount ? it('new', 'Newly installed', newCount, svg('<path d="M12 3v18M3 12h18"/>')) : ''}
+    ${base.some(isUAD) ? it('uad', 'UAD Plugins', base.filter(isUAD).length, svg('<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10v4M11 10v4M15 10v4"/>')) : ''}
+    ${S.kontakt?.libraries.length ? it('kontakt', 'Kontakt Libraries', S.kontakt.libraries.length, svg('<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/>')) : ''}
+    ${S.kontakt?.libraries.length || S.kontakt?.presets.length ? it('kpresets', 'Kontakt Presets', S.kontakt.presets.length, svg('<path d="M6 3h9l3 3v15H6z"/><path d="M9 13l2 2 4-4"/>')) : ''}
     ${u.hidden.length ? it('hidden', 'Hidden', u.hidden.length, svg('<path d="M3 3l18 18M10.6 6.1A10 10 0 0 1 22 12a14 14 0 0 1-3 3.8M6.2 6.3A14 14 0 0 0 2 12s4 7 10 7a9.6 9.6 0 0 0 4.2-1"/>')) : ''}
-    <h4>Type</h4>
-    <div class="seg">${[['all', 'All'], ['inst', 'Instr.'], ['fx', 'Effects'], ['midi', 'MIDI']].map(([k, l]) => `<button data-kind="${k}" class="${F.kind === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    ${S.f.coll === 'kpresets' ? `<h4>Type</h4><div class="seg">${[['all', 'All'], ['preset', 'Presets'], ['rack', 'Racks']].map(([k, l]) => `<button data-kkind="${k}" class="${(S.f.kkind || 'all') === k ? 'on' : ''}">${l}</button>`).join('')}</div>`
+      : S.f.coll === 'kontakt' ? '' : `<h4>Type</h4>
+    <div class="seg">${[['all', 'All'], ['inst', 'Instr.'], ['fx', 'Effects'], ['midi', 'MIDI']].map(([k, l]) => `<button data-kind="${k}" class="${F.kind === k ? 'on' : ''}">${l}</button>`).join('')}</div>`}</div>
     <h4><span>Collections</span><button class="link" id="newColl">+ New</button></h4>`;
   if (!u.collections.length) h += '<div class="hint">Your own lists, e.g. “Vocal chain” or “Mix bus”. Just drag tiles here.</div>';
   for (const c of u.collections) {
@@ -340,6 +359,10 @@ function renderSide() {
     h += `<button class="item${on ? ' on' : ''}" data-rack="${r.id}" data-drop="r:${r.id}">${svg('<rect x="3" y="4" width="18" height="5" rx="1.5"/><rect x="3" y="11" width="18" height="5" rx="1.5"/><path d="M7 20h10"/>')}<span class="t">${esc(r.name)}</span><span class="n">${r.items.length}</span></button>`;
   }
 
+  if (typeof isKontaktView === 'function' && isKontaktView()) {
+    h += kontaktSide();
+    const sd = $('#side'), sc = sd.scrollTop; sd.innerHTML = h; sd.scrollTop = sc; return;
+  }
   // categories (counted without the category filter itself)
   const cc = {};
   for (const f of S.fams) if (passes(f, 'cat')) cc[f.category] = (cc[f.category] || 0) + 1;
@@ -534,6 +557,8 @@ async function renderSetup() {
       <label class="check"><input type="checkbox" id="showAAX" ${settings().showAAX ? 'checked' : ''}> Show AAX plugins in the library (only Pro Tools loads them)</label>
     </div>
     ${picsBox()}
+    ${remoteBox()}
+    ${builderBox()}
     <div class="box">
       <h2>Scan</h2>
       <p>${lib ? `Last scanned ${ago(lib.scannedAt)} – ${lib.plugins.length} entries in ${new Set(lib.plugins.map(p => p.path)).size} files. ${lib.liveDB ? 'Read Ableton’s plugin database.' : 'No Ableton plugin database found.'}` : 'Not scanned yet.'}</p>
@@ -556,6 +581,45 @@ async function renderSetup() {
     </div>
   </div>`;
 }
+
+/* ---------- Kontakt preset builder ---------- */
+function builderBox() {
+  const b = S.builder;
+  if (!b) return '';
+  const rows = (b.next || []).map((x, i) => `<li><b>${esc(x.library)}</b> – ${esc(x.instrument)}<br><span class="code" style="font-size:11px">${esc(x.path)}</span></li>`).join('');
+  return `<div class="box wide">
+    <h2>Kontakt preset builder <span class="tag">${b.remaining} libraries without a preset</span></h2>
+    <p>Makes Kontakt presets in blocks of 15. PlugShelf puts each instrument’s track with Kontakt into Live; you load the listed instrument into each Kontakt with <b>Files → Load…</b> and save the set; PlugShelf then writes the presets to <span class="code">User Library › Kontakt Presets</span>.</p>
+    <ol class="steps">
+      <li><button class="btn sm pri" id="kbBlock" ${b.remaining ? '' : 'disabled'}>Put the next ${Math.min(15, b.remaining)} on tracks</button> – in an empty Live set</li>
+      <li>In each “KP · …” track’s Kontakt load the instrument below, then save the set as <span class="code">${esc(b.setFile)}</span> (first time Cmd+Shift+S, then Cmd+S)</li>
+      <li><button class="btn sm" id="kbHarvest">Make presets from the saved set</button></li>
+      <li><button class="btn sm" id="kbClear">Remove the KP tracks</button> – then start again at 1</li>
+    </ol>
+    ${S.builderMsg ? `<p class="hint" style="padding:6px 0">${esc(S.builderMsg)}</p>` : ''}
+    ${rows ? `<details open><summary>Next block (${(b.next || []).length})</summary><ol class="kblist">${rows}</ol></details>` : '<p class="hint">Every connected library has a preset.</p>'}
+  </div>`;
+}
+async function refreshBuilder() { try { S.builder = await api.get('/api/kontakt/plan'); } catch { S.builder = null; } }
+
+/* ---------- iPad remote ---------- */
+function remoteBox() {
+  const r = S.remote || {};
+  return `<div class="box">
+    <h2>iPad remote ${r.running ? '<span class="tag ok">on</span>' : '<span class="tag">off</span>'}</h2>
+    <p>Browse your plugins and chains on an iPad or iPhone in the same Wi-Fi and load them into Live on this Mac. Off by default; a device needs the code below once.</p>
+    <label class="check"><input type="checkbox" id="remoteOn" ${r.enabled ? 'checked' : ''}> Allow the iPad remote on this network</label>
+    ${r.enabled ? `
+      ${r.running ? `<ol class="steps">
+        <li>On the iPad, open Safari at ${(r.urls || []).map(u => `<span class="code">${esc(u)}</span>`).join(' or ') || '<i>(no network found)</i>'}</li>
+        <li>Enter the code <b class="code" style="font-size:18px;letter-spacing:.2em">${esc(r.code)}</b></li>
+        <li>Share → <b>Add to Home Screen</b> – it then opens like an app</li>
+      </ol>` : '<p class="hint">The remote server could not start (port in use?).</p>'}
+      <div class="btns"><button class="btn" id="remoteCode">New code</button>${r.devices ? `<button class="btn" id="remoteForget">Unpair ${r.devices} device${r.devices > 1 ? 's' : ''}</button>` : ''}</div>
+      <p class="hint" style="padding:8px 0 0">The first time, macOS may ask whether PlugShelf may accept incoming connections – allow it. Paired devices can load plugins and chains, nothing else.</p>` : ''}
+  </div>`;
+}
+async function refreshRemote() { try { S.remote = await api.get('/api/remote'); } catch { S.remote = null; } }
 
 /* ---------- pictures ---------- */
 function picCounts() {
@@ -648,11 +712,23 @@ async function watchCapture() {
 }
 
 /* ---------- actions ---------- */
-let saveT;
+let saveT, userDirty = false;
 function saveUser() {
   clearTimeout(saveT);
-  saveT = setTimeout(() => api.post('/api/user', S.user), 250);
+  userDirty = true;
+  saveT = setTimeout(() => api.post('/api/user', S.user).finally(() => { userDirty = false; }), 250);
 }
+
+// Favourites set on the iPad remote: pick them up while nothing of our own is waiting to be saved.
+setInterval(async () => {
+  if (userDirty || !S.user || document.hidden) return;
+  try {
+    const u = await api.get('/api/user');
+    if (userDirty || JSON.stringify(u.favs) === JSON.stringify(S.user.favs)) return;
+    S.user.favs = u.favs;
+    if (S.view === 'lib') renderLib();
+  } catch { /* app busy */ }
+}, 4000);
 
 function toast(msg, kind = '', action) {
   const t = document.createElement('div');
@@ -875,7 +951,7 @@ function show(v) {
   if (v === 'lib') renderLib();
   if (v === 'chains') renderChains();
   if (v === 'health') renderHealth();
-  if (v === 'setup') { renderSetup(); Promise.all([refreshScript(), refreshRone()]).then(() => S.view === 'setup' && renderSetup()); }
+  if (v === 'setup') { renderSetup(); Promise.all([refreshScript(), refreshRone(), refreshRemote(), refreshBuilder()]).then(() => S.view === 'setup' && renderSetup()); }
 }
 
 async function refreshRone() {
@@ -1002,7 +1078,7 @@ function bind() {
       S.drawer = S.drawer?.type === 'rack' && S.drawer.id === t.dataset.rack ? null : { type: 'rack', id: t.dataset.rack };
       renderSide(); return renderDrawer();
     }
-    if ('coll' in t.dataset) { S.f.coll = t.dataset.coll || null; S.sel = 0; $('#main').scrollTop = 0; return renderLib(); }
+    if ('coll' in t.dataset) { S.f.coll = t.dataset.coll || null; S.f.kcat = null; S.f.kven = null; S.f.kkind = null; S.sel = 0; if (/^k(ontakt|presets)$/.test(S.f.coll || '')) loadKontakt(); $('#main').scrollTop = 0; return renderLib(); }
     if (t.dataset.cat) { S.f.cat = S.f.cat === t.dataset.cat ? null : t.dataset.cat; S.sel = 0; $('#main').scrollTop = 0; return renderLib(); }
     if (t.dataset.maker) { S.f.maker = S.f.maker === t.dataset.maker ? null : t.dataset.maker; S.sel = 0; $('#main').scrollTop = 0; return renderLib(); }
   });
@@ -1226,6 +1302,20 @@ function bindPages() {
       await refreshRone();
       renderSetup();
     }
+    if (t.id === 'kbBlock' || t.id === 'kbHarvest' || t.id === 'kbClear') {
+      const ep = { kbBlock: 'block', kbHarvest: 'harvest', kbClear: 'clear' }[t.id];
+      const r = await api.post('/api/kontakt/' + ep, {});
+      S.builderMsg = ep === 'harvest'
+        ? (r.ok ? `${(r.written || []).length} presets written${r.empty?.length ? `; still empty (no instrument loaded): ${r.empty.join(', ')}` : ''}.` : r.msg)
+        : (r.msg || (r.ok ? 'Done' : 'Live did not answer – is it open with the PlugShelf control surface?'));
+      await refreshBuilder();
+      if (ep === 'harvest') loadKontakt(true);
+      renderSetup();
+    }
+    if (t.id === 'remoteCode' || t.id === 'remoteForget') {
+      S.remote = await api.post('/api/remote', t.id === 'remoteCode' ? { newCode: true } : { forget: true });
+      renderSetup();
+    }
     if (t.dataset.up || t.dataset.down) {
       const o = prefer().slice(), i = +(t.dataset.up ?? t.dataset.down), j = t.dataset.up ? i - 1 : i + 1;
       [o[i], o[j]] = [o[j], o[i]];
@@ -1234,6 +1324,7 @@ function bindPages() {
     }
   });
   $('#setup').addEventListener('change', e => {
+    if (e.target.id === 'remoteOn') { api.post('/api/remote', { enabled: e.target.checked }).then(r => { S.remote = r; renderSetup(); }); }
     if (e.target.id === 'picsOn') { settings().pics = e.target.checked; saveUser(); $('#picsToggle').classList.toggle('on', picsOn()); }
     if (e.target.id === 'showAAX') {
       settings().showAAX = e.target.checked;

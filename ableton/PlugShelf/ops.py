@@ -4,10 +4,13 @@
 #   {"op": "load", "name": "Pro-Q 3", "format": "VST3", "vendor": "FabFilter"}
 #   {"op": "rack", "items": [{"name": ..., "format": ..., "vendor": ...}, ...]}
 #   {"op": "load_preset", "folder": "PlugShelf", "name": "Vocal Chain"}   a rack PlugShelf saved
+#   {"op": "load_user", "folder": "Kontakt Presets", "name": "X.vstpreset"}  any file in the User Library
+#   {"op": "kontakt_block", "tracks": ["KP · Lib - Instr", ...]}  MIDI tracks with Kontakt 8, for the preset builder
+#   {"op": "kontakt_clear", "prefix": "KP · "}   deletes those tracks again
 #   {"op": "inspect"}                                                    what is on the selected track
 #   {"op": "test_track", "action": "create" | "delete", ...}             scratch track for testing
 
-VERSION = "3"
+VERSION = "6"
 
 # Folder names Live uses for each plugin format in its browser.
 FORMAT_FOLDERS = {
@@ -33,6 +36,8 @@ def handle(cs, cmd):
     track = cs.song().view.selected_track
     if op == "load":
         item = find_plugin(cs, cmd.get("name"), cmd.get("format"), cmd.get("vendor"))
+        if item is not None and cmd.get("instrument"):
+            track = free_instrument_track(cs, track)
         if item is None:
             return {"ok": False, "msg": "Live does not list %s (%s). Rescan under Settings > Plug-Ins in Live."
                     % (cmd.get("name"), cmd.get("format"))}
@@ -59,6 +64,23 @@ def handle(cs, cmd):
             return {"ok": False, "retry": True, "msg": "Live does not show the rack in its browser yet"}
         cs.queue.append(item)
         return {"ok": True, "msg": "%s → %s" % (cmd.get("name"), track.name)}
+    if op == "find_user":
+        item = find_user_item(cs, cmd.get("folder", ""), cmd.get("name", ""))
+        if item is None:
+            return {"ok": False, "msg": "not found"}
+        return {"ok": True, "name": item.name, "uri": getattr(item, "uri", ""), "loadable": item.is_loadable, "device": item.is_device}
+    if op == "load_user":
+        item = find_user_item(cs, cmd.get("folder", ""), cmd.get("name", ""))
+        if item is None:
+            return {"ok": False, "msg": "Live does not show %s in the User Library yet" % cmd.get("name")}
+        if cmd.get("instrument"):
+            track = free_instrument_track(cs, track)
+        cs.queue.append(item)
+        return {"ok": True, "msg": "%s → %s" % (item.name, track.name)}
+    if op == "kontakt_block":
+        return kontakt_block(cs, cmd.get("tracks", []))
+    if op == "kontakt_clear":
+        return kontakt_clear(cs, cmd.get("prefix", "KP · "))
     if op == "rescan_browser":
         return {"ok": True, "msg": "ok"}
     if op == "test_track":
@@ -130,6 +152,97 @@ def find_preset(cs, folder, name):
         return None
 
     return walk(cs.application().browser.user_library, 0, False)
+
+
+class TrackQueue(list):
+    """The tick loader pops one entry at a time; an entry (item, track) selects its track first."""
+    def __init__(self, song, items=()):
+        list.__init__(self, items)
+        self.song = song
+
+    def pop(self, i=0):
+        entry = list.pop(self, i)
+        if isinstance(entry, tuple):
+            item, track = entry
+            try:
+                self.song.view.selected_track = track
+            except Exception:
+                pass
+            return item
+        return entry
+
+
+def kontakt_block(cs, names):
+    """New MIDI tracks at the end of the set, named for the preset builder, each getting Kontakt 8."""
+    song = cs.song()
+    item = find_plugin(cs, "Kontakt 8", "VST3", "Native Instruments")
+    if item is None:
+        return {"ok": False, "msg": "Live does not list Kontakt 8 (VST3)"}
+    if not isinstance(cs.queue, TrackQueue):
+        cs.queue = TrackQueue(song, cs.queue)
+    made = 0
+    for name in names:
+        song.create_midi_track(len(song.tracks))
+        track = song.tracks[len(song.tracks) - 1]
+        track.name = name
+        cs.queue.append((item, track))
+        made += 1
+    return {"ok": True, "msg": "%d tracks with Kontakt 8" % made, "tracks": made}
+
+
+def kontakt_clear(cs, prefix):
+    """Deletes the preset builder's tracks (only those whose name starts with the prefix)."""
+    song = cs.song()
+    gone = 0
+    for i in range(len(song.tracks) - 1, -1, -1):
+        if song.tracks[i].name.startswith(prefix):
+            try:
+                song.delete_track(i)
+                gone += 1
+            except Exception:
+                pass   # Live keeps at least one track
+    return {"ok": True, "msg": "%d builder tracks removed" % gone, "removed": gone}
+
+
+def free_instrument_track(cs, track):
+    """An instrument goes onto a MIDI track without one: the selected track if it is free, otherwise a new
+    MIDI track right after it (an instrument already on the track is never replaced)."""
+    song = cs.song()
+    try:
+        busy = any(int(d.type) == 1 for d in track.devices)   # 1 = instrument
+        if track.has_midi_input and not busy:
+            return track
+        tracks = list(song.tracks)
+        index = tracks.index(track) + 1 if track in tracks else len(tracks)
+        song.create_midi_track(index)
+        new = song.tracks[index]
+        song.view.selected_track = new
+        return new
+    except Exception as e:
+        cs.log_message("PlugShelf: no free track (%s)" % e)
+        return track
+
+
+def find_user_item(cs, folder, name):
+    """A loadable item in the User Library by file name (Live may show it with or without extension)."""
+    want = (name or "").lower()
+    stem = want.rsplit(".", 1)[0] if "." in want else want
+    folder = (folder or "").lower()
+
+    def walk(item, depth, inside):
+        if depth > 8:
+            return None
+        for child in item.children:
+            n = child.name.lower()
+            if inside and child.is_loadable and n in (want, stem):
+                return child
+            if child.is_folder or len(child.children) > 0:
+                found = walk(child, depth + 1, inside or not folder or n == folder)
+                if found is not None:
+                    return found
+        return None
+
+    return walk(cs.application().browser.user_library, 0, not folder)
 
 
 # ---- for testing: a scratch track, and what is on the selected track ------------------

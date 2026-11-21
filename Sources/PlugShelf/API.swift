@@ -7,6 +7,7 @@ final class API {
     let scanner = Scanner()
     let thumbs = Thumbs()
     let racks = RackBuilder()
+    let remote = RemoteAccess()
     private let lock = NSLock()
     private var library: Library?
     private var libraryData = Data("null".utf8)
@@ -48,10 +49,53 @@ final class API {
 
     func handle(_ r: HTTPRequest) -> HTTPResponse {
         if r.path.hasPrefix("/thumbs/") { return thumb(r.path) }
+        if r.path.hasPrefix("/kontakt/art/") { return kontaktArt(r.path) }
         if !r.path.hasPrefix("/api/") { return file(r.path) }
         switch (r.method, r.path) {
         case ("GET", "/api/state"):
             return state()
+        case ("GET", "/api/kontakt"):
+            let libs = kontaktLibraries(refresh: r.query["refresh"] != nil)
+            return .json(["libraries": libs.map(\.json), "presets": Kontakt.presets(libraries: libs)])
+        case ("GET", "/api/kontakt/plan"):
+            let libs = kontaktLibraries(refresh: true)
+            let plan = KontaktBuilder.plan(libraries: libs, presets: Kontakt.presets(libraries: libs))
+            return .json(["ok": true, "remaining": plan.count, "next": Array(plan.prefix(KontaktBuilder.blockSize)),
+                          "setFile": KontaktBuilder.setFile.path, "skipped": KontaktBuilder.skipped()])
+        case ("POST", "/api/kontakt/block"):
+            let libs = kontaktLibraries(refresh: true)
+            let next = Array(KontaktBuilder.plan(libraries: libs, presets: Kontakt.presets(libraries: libs)).prefix(KontaktBuilder.blockSize))
+            guard !next.isEmpty else { return .json(["ok": true, "msg": "Every library has a preset", "tracks": []]) }
+            var res = Ableton.send(["op": "kontakt_block", "tracks": next.map { $0["track"] as? String ?? "" }], timeout: 3)
+            res["block"] = next
+            return .json(res)
+        case ("POST", "/api/kontakt/harvest"):
+            let r = KontaktBuilder.harvest()
+            lock.lock(); kontaktCache = nil; lock.unlock()
+            return .json(r)
+        case ("POST", "/api/kontakt/clear"):
+            return .json(Ableton.send(["op": "kontakt_clear", "prefix": KontaktBuilder.trackPrefix], timeout: 3))
+        case ("POST", "/api/kontakt/skip"):
+            let b = r.json()
+            guard let lib = b["library"] as? String, !lib.isEmpty else { return .error(400, "No library") }
+            KontaktBuilder.skip(lib, reason: b["reason"] as? String ?? "skipped")
+            return .json(["ok": true])
+        case ("POST", "/api/kontakt/load"):
+            let want = r.json()["id"] as? String ?? ""
+            guard let p = Kontakt.presets(libraries: kontaktLibraries()).first(where: { $0["id"] as? String == want }) else { return .error(404, "Preset not found") }
+            var res = Ableton.send(["op": "load_user", "folder": p["folder"] ?? "", "name": p["file"] ?? "", "instrument": true], timeout: 2)
+            if res["ok"] as? Bool == true { res["msg"] = "\(p["name"] as? String ?? "Preset") → Live" }
+            return .json(res)
+        case ("GET", "/api/uapresets"):
+            return .json(API.uaPresets)
+        case ("GET", "/api/remote"):
+            return .json(remote.status())
+        case ("POST", "/api/remote"):
+            let b = r.json()
+            if let on = b["enabled"] as? Bool { remote.setEnabled(on, api: self) }
+            if b["newCode"] as? Bool == true { remote.newCode() }
+            if b["forget"] as? Bool == true { remote.forget() }
+            return .json(remote.status())
         case ("POST", "/api/scan"):
             startScan()
             return .json(["ok": true])
@@ -62,6 +106,12 @@ final class API {
             let p = scanner.progress
             lock.lock(); let at = library?.scannedAt ?? 0; lock.unlock()
             return .json(["running": p.running, "phase": p.phase, "done": p.done, "total": p.total, "scannedAt": at])
+        case ("GET", "/api/user"):
+            return .data(user.data())
+        case ("POST", "/api/remote/fav"):
+            let b = r.json()
+            guard let key = b["key"] as? String, !key.isEmpty, key.count < 200 else { return .error(400, "No plugin") }
+            return .json(["ok": true, "favs": user.setFav(key, b["on"] as? Bool ?? true)])
         case ("POST", "/api/user"):
             user.replace(with: r.json())
             return .json(["ok": true])
@@ -193,7 +243,7 @@ final class API {
         if let aax = ps.first(where: { $0.format == "AAX" }) {
             return .json(["ok": false, "msg": "\(aax.display) is only installed as AAX – only Pro Tools loads that."])
         }
-        let items: [[String: Any]] = ps.map { ["name": $0.liveName, "format": $0.format, "vendor": $0.vendor] }
+        let items: [[String: Any]] = ps.map { ["name": $0.liveName, "format": $0.format, "vendor": $0.vendor, "instrument": $0.kind == "inst"] }
         var reply = ps.count == 1
             ? Ableton.send(["op": "load"].merging(items[0]) { a, _ in a })
             : Ableton.send(["op": "rack", "items": items], timeout: 3.0)
@@ -216,7 +266,61 @@ final class API {
         "svg": "image/svg+xml", "png": "image/png", "json": "application/json", "woff2": "font/woff2", "ico": "image/x-icon",
     ]
 
-    private func file(_ path: String) -> HTTPResponse {
+    // MARK: Kontakt
+
+    private var kontaktCache: (at: Date, libs: [Kontakt.Library])?
+    func kontaktLibraries(refresh: Bool = false) -> [Kontakt.Library] {
+        lock.lock(); let c = kontaktCache; lock.unlock()
+        if !refresh, let c, Date().timeIntervalSince(c.at) < 300 { return c.libs }
+        let libs = Kontakt.libraries()
+        lock.lock(); kontaktCache = (Date(), libs); lock.unlock()
+        return libs
+    }
+
+    private func kontaktArt(_ path: String) -> HTTPResponse {
+        let id = String(path.dropFirst("/kontakt/art/".count).prefix { $0 != "." })
+        guard let art = kontaktLibraries().first(where: { $0.id == id })?.art, let d = try? Data(contentsOf: URL(fileURLWithPath: art)) else { return .error(404, "No artwork") }
+        var res = HTTPResponse.data(d, type: "image/png")
+        res.headers["Cache-Control"] = "max-age=86400"
+        return res
+    }
+
+    /// UA Console's channel-strip presets on this Mac (group = folder, plugins in insert order).
+    /// Read from the user's own UA installation at runtime – nothing of UA's is copied into PlugShelf.
+    static let uaPresets: [[String: Any]] = {
+        let root = URL(fileURLWithPath: "/Library/Application Support/Universal Audio/Presets/Channel Strip")
+        guard let en = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else { return [] }
+        let re = try! NSRegularExpression(pattern: "<plugin_name>\\s*([^<]*?)\\s*</plugin_name>")
+        var out: [[String: Any]] = []
+        for case let u as URL in en where u.pathExtension == "uadchannel" {
+            guard let s = try? String(contentsOf: u, encoding: .utf8) else { continue }
+            let names = re.matches(in: s, range: NSRange(s.startIndex..., in: s)).compactMap { m in Range(m.range(at: 1), in: s).map { String(s[$0]) } }
+            guard !names.isEmpty else { continue }
+            let rel = u.path.dropFirst(root.path.count + 1).split(separator: "/")
+            out.append(["group": rel.count > 1 ? String(rel[0]) : "Other", "name": u.deletingPathExtension().lastPathComponent, "plugins": names])
+        }
+        return out.sorted { ($0["group"] as! String, $0["name"] as! String) < ($1["group"] as! String, $1["name"] as! String) }
+    }()
+
+    /// The library for the iPad remote: names, makers, categories, formats and pictures – no file paths.
+    func remoteState() -> HTTPResponse {
+        lock.lock(); let lib = libraryData; lock.unlock()
+        let keep: Set<String> = ["id", "family", "name", "display", "vendor", "kind", "category", "format", "archs", "status", "liveFailed", "source", "mtime", "shell"]
+        var library: [String: Any] = [:]
+        if let o = (try? JSONSerialization.jsonObject(with: lib)) as? [String: Any] {
+            library["machine"] = o["machine"]
+            library["plugins"] = ((o["plugins"] as? [[String: Any]]) ?? []).map { $0.filter { keep.contains($0.key) } }
+        }
+        var u: [String: Any] = [:]
+        if let o = (try? JSONSerialization.jsonObject(with: user.data())) as? [String: Any] {
+            for k in ["favs", "hidden", "collections", "lastUsed", "usage", "overrides"] { u[k] = o[k] }
+            let st = o["settings"] as? [String: Any] ?? [:]
+            u["settings"] = ["prefer": st["prefer"] ?? NSNull(), "showAAX": st["showAAX"] ?? false]
+        }
+        return .json(["library": library, "user": u, "pics": thumbs.index()])
+    }
+
+    func file(_ path: String) -> HTTPResponse {
         let rel = path == "/" ? "index.html" : String(path.dropFirst())
         let url = Paths.web.appendingPathComponent(rel).standardizedFileURL
         guard url.path.hasPrefix(Paths.web.standardizedFileURL.path + "/"),

@@ -495,6 +495,33 @@ int ph_vst3_states(void *handle, unsigned char **proc, int *procLen, unsigned ch
     return 1;
 }
 
+/* Hands a saved state to the plugin (IComponent::setState + the controller's setComponentState)
+   and returns the plugin's own result code. */
+int ph_vst3_set_state(void *handle, const unsigned char *data, int len) {
+    V3 *h = (V3 *)handle;
+    Stream *st = calloc(1, sizeof(Stream));
+    st->vt = st_vt;
+    st->data = malloc((size_t)(len > 0 ? len : 1));
+    memcpy(st->data, data, (size_t)len);
+    st->size = st->cap = len;
+    tresult r = ((tresult (*)(void *, void *))VT(h->component)[12])(h->component, st);   // IComponent::setState
+    st->pos = 0;
+    ((tresult (*)(void *, void *))VT(h->controller)[5])(h->controller, st);              // IEditController::setComponentState
+    free(st->data); free(st);
+    return (int)r;
+}
+
+/* The component's current state (IComponent::getState), freshly read. Caller frees *out. */
+int ph_vst3_get_state(void *handle, unsigned char **out, int *outLen) {
+    V3 *h = (V3 *)handle;
+    Stream *st = calloc(1, sizeof(Stream));
+    st->vt = st_vt;
+    tresult r = ((tresult (*)(void *, void *))VT(h->component)[13])(h->component, st);
+    *out = st->data; *outLen = (int)st->size;
+    free(st);
+    return (int)r;
+}
+
 /* ---------------------------------------------------------------- crash guard */
 
 static void on_crash(int sig) {

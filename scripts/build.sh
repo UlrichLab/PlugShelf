@@ -26,6 +26,7 @@ ICONSET="build/PlugShelf.iconset"
 rm -rf "$ICONSET"
 swift scripts/make_icon.swift "$ICONSET"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/PlugShelf.icns"
+cp "$ICONSET/icon_128x128@2x.png" "$APP/Contents/Resources/web/remote/icon.png"   # iPad home-screen icon
 rm -rf "$ICONSET"
 
 cat > "$APP/Contents/Info.plist" <<PLIST

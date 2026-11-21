@@ -67,6 +67,18 @@ configure Python themselves.
   rooms. Hardware names are matched to an installed emulation or a comparable stand-in.
 - **Ableton racks** – turns a chain into an Audio Effect Rack (`.adg`) with named macros and starting values,
   saves it in the User Library, and can load it onto the selected track.
+- **UA Console presets** – the channel-strip presets of a UA installation (Bass, Drums, Guitar, Keyboards,
+  Vocals …) appear as chains under *UAD Chains*.
+- **iPad / iPhone remote** – Setup → *iPad remote*: browse the library and chains on an iPad or iPhone in the
+  same Wi-Fi and load them into Live. Off by default; pairing with a 6-digit code; paired devices see no file
+  paths. "Add to Home Screen" opens it like an app.
+- **Kontakt** – *Kontakt Libraries* lists the libraries from Kontakt's own database with NI's artwork, grouped by
+  sound category and filterable by vendor. *Kontakt Presets* shows Kontakt `.vstpreset` files and Instrument
+  Racks (`.adg`) saved in a folder named `Kontakt Presets`, filterable by All / Presets / Racks. One click puts
+  the instrument on a new MIDI track. Both views are in the iPad remote too.
+- **Kontakt preset builder** – Setup → *Kontakt preset builder*: adds blocks of MIDI tracks with Kontakt to Live,
+  one per library without a preset; once the instruments are loaded and the set is saved, *Harvest* writes a
+  preset per track to User Library › Kontakt Presets.
 - **Plugin health** – reports disk use, redundant VST2/VST3 installs, AAX without Pro Tools, Intel-only and
   broken bundles, and Live scan failures. PlugShelf does not delete plugin files.
 
@@ -90,4 +102,4 @@ the source layout.
 
 ## Not in yet
 
-Global hotkeys and mouse ring, compact side strip, MIDI library, insights, phone remote, and Stream Deck support.
+Global hotkeys and mouse ring, compact side strip, MIDI library, insights, and Stream Deck support.

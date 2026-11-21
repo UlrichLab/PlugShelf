@@ -19,6 +19,7 @@ let api = API()
 let server = HTTPServer { api.handle($0) }
 do {
     try server.start(preferredPort: 47900)
+    api.remote.start(api: api)
 } catch {
     FileHandle.standardError.write(Data("PlugShelf: \(error.localizedDescription)\n".utf8))
     exit(1)

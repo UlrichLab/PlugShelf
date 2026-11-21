@@ -1,6 +1,7 @@
 import Foundation
 
-/// A small blocking HTTP/1.1 server bound to 127.0.0.1 only.
+/// A small blocking HTTP/1.1 server. The app's own server is bound to 127.0.0.1 only; the optional
+/// iPad remote runs a second instance on all interfaces (see Remote.swift), which does its own access checks.
 /// One request per connection; each connection is handled on a concurrent queue.
 struct HTTPRequest {
     var method: String
@@ -39,9 +40,20 @@ final class HTTPServer {
     private(set) var port: UInt16 = 0
     private let handler: (HTTPRequest) -> HTTPResponse
     private let queue = DispatchQueue(label: "plugshelf.http", attributes: .concurrent)
+    private let address: String
+    private let localOnly: Bool
+    private var stopped = false
 
-    init(handler: @escaping (HTTPRequest) -> HTTPResponse) {
+    /// `localOnly`: only requests whose Host is 127.0.0.1/localhost (guards against DNS rebinding).
+    init(address: String = "127.0.0.1", localOnly: Bool = true, handler: @escaping (HTTPRequest) -> HTTPResponse) {
+        self.address = address
+        self.localOnly = localOnly
         self.handler = handler
+    }
+
+    func stop() {
+        stopped = true
+        if fd >= 0 { shutdown(fd, SHUT_RDWR); close(fd); fd = -1 }
     }
 
     /// Tries the preferred port first, then the next few.
@@ -66,7 +78,7 @@ final class HTTPServer {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = p.bigEndian
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        addr.sin_addr.s_addr = inet_addr(address)
         let ok = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.bind(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
@@ -78,9 +90,9 @@ final class HTTPServer {
     }
 
     private func acceptLoop() {
-        while true {
+        while !stopped {
             let c = accept(fd, nil, nil)
-            if c < 0 { continue }
+            if c < 0 { if stopped { break }; continue }
             var noSig: Int32 = 1
             setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &noSig, socklen_t(MemoryLayout<Int32>.size))
             var tv = timeval(tv_sec: 10, tv_usec: 0)
@@ -96,7 +108,7 @@ final class HTTPServer {
         // Requests must come from our own page: the Host header guards against DNS rebinding,
         // and a custom header on POST forces a CORS preflight that we never answer.
         let host = (req.headers["host"] ?? "").split(separator: ":").first.map(String.init) ?? ""
-        if host != "127.0.0.1" && host != "localhost" {
+        if localOnly && host != "127.0.0.1" && host != "localhost" {
             res = .error(403, "forbidden host")
         } else if req.method == "POST" && req.headers["x-plugshelf"] != "1" {
             res = .error(403, "missing header")
