@@ -31,7 +31,7 @@ if CommandLine.arguments.contains("--headless") {
     dispatchMain()
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     var window: NSWindow!
     var web: WKWebView!
 
@@ -43,6 +43,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
         config.userContentController.addUserScript(
             WKUserScript(source: "window.__plugshelfApp = true;", injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // WKWebView ignores CSS app-region, so the top bar asks the window to move (and double-click zooms, like a title bar)
+        config.userContentController.addUserScript(WKUserScript(source: """
+            document.addEventListener('mousedown', e => {
+              if (e.button !== 0) return;
+              const t = e.target;
+              if (!t.closest || !t.closest('.top, .brand') || t.closest('button, input, select, textarea, a, label, .chip, [role=button]')) return;
+              window.webkit.messageHandlers.win.postMessage(e.detail === 2 ? 'zoom' : 'drag');
+            }, true);
+            """, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        config.userContentController.add(self, name: "win")
         web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = self
         web.uiDelegate = self
@@ -67,6 +77,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         web.load(URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/")!))
         NSApp.activate(ignoringOtherApps: true)
     }
+
+    func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "win", let what = message.body as? String else { return }
+        if what == "zoom" { window.zoom(nil); return }
+        // the message arrives after the click, so follow the mouse ourselves until the button goes up
+        guard NSEvent.pressedMouseButtons & 1 == 1, dragMonitor == nil else { return }
+        let start = NSEvent.mouseLocation, origin = window.frame.origin
+        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] e in
+            guard let self else { return e }
+            if e.type == .leftMouseUp {
+                if let m = self.dragMonitor { NSEvent.removeMonitor(m) }
+                self.dragMonitor = nil
+                return e
+            }
+            let p = NSEvent.mouseLocation
+            self.window.setFrameOrigin(NSPoint(x: origin.x + p.x - start.x, y: origin.y + p.y - start.y))
+            return nil
+        }
+    }
+    private var dragMonitor: Any?
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
