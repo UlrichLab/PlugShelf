@@ -36,7 +36,7 @@ Run the verification script against either an app bundle or a release archive:
 
 ```bash
 ./scripts/verify-release.sh build/PlugShelf.app
-./scripts/verify-release.sh PlugShelf-0.1.0-mac.zip
+./scripts/verify-release.sh PlugShelf-0.2.0-mac.zip
 ```
 
 The script verifies the bundle signature, both processor slices, the minimum macOS version, required resources,

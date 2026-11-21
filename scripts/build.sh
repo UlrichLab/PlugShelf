@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 OUT="build/PlugShelf.app"
 # Assemble and sign outside the project folder: when it lives in iCloud Drive, the File Provider
 # stamps Finder info onto a fresh bundle, and codesign refuses to sign it ("detritus not allowed").
