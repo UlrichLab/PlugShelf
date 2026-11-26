@@ -147,7 +147,7 @@ enum CaptureMode {
 
     /// Waits until the editor has drawn something and stopped changing, then saves it.
     static func captureLoop(to out: URL) -> Never {
-        pump(1.2)
+        pump(1.2 + (Double(ProcessInfo.processInfo.environment["PLUGSHELF_CAPTURE_WAIT"] ?? "") ?? 0))
         var last: CGImage?
         var lastSig: [UInt8]?
         let deadline = Date().addingTimeInterval(9)

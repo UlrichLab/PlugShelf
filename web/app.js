@@ -460,12 +460,27 @@ function archLabel(p) {
 /** Short description from plugin-info.js (what it does, what stands out, typical settings, known uses). */
 function infoText(f) {
   const x = typeof pluginInfo === 'function' && (pluginInfo(f.name) || f.items.map(p => pluginInfo(p.name)).find(Boolean));
-  if (!x) return `<div class="pinfo none">No description for this plugin yet.</div>`;
   const li = a => a?.length ? `<ul>${a.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : '';
-  return `<div class="pinfo"><p>${esc(x.what)}</p>
+  const o = famOriginal(f);
+  if (!x && !o) return `<div class="pinfo none">No description for this plugin yet.</div>`;
+  const own = x ? `<p>${esc(x.what)}</p>
     ${x.special?.length ? `<h5>What stands out</h5>${li(x.special)}` : ''}
-    ${x.settings?.length ? `<h5>Typical settings</h5>${li(x.settings)}` : ''}
-    </div>`;
+    ${x.settings?.length ? `<h5>Typical settings</h5>${li(x.settings)}` : ''}` : '';
+  let orig = '';
+  if (o) {
+    const sibs = S.fams.filter(g => g !== f && famOriginal(g) === o).sort((a, b) => a.name.localeCompare(b.name));
+    orig = `<div class="porig"><h5>The original: ${esc(o.title)}</h5><p>${esc(o.text)}</p>${li(o.facts)}
+      ${o.uses?.length ? `<h5>Typical use of the original</h5>${li(o.uses)}` : ''}
+      ${sibs.length ? `<h5>Also modelled on it in your library (${sibs.length})</h5><div class="psibs">${sibs.map(g => `<button class="osib" data-openfam="${esc(g.key)}" title="${esc(g.vendor)}">${esc(g.name)}<small>${esc(g.vendor)}</small></button>`).join('')}</div>` : ''}</div>`;
+  }
+  return `<div class="pinfo">${own}${orig}</div>`;
+}
+
+/** The classic hardware unit a plugin family emulates (originals.js), cached per family. */
+function famOriginal(f) {
+  if (typeof originalFor !== 'function') return null;
+  if (f._orig === undefined) f._orig = originalFor(f.name) || f.items.map(p => originalFor(p.name)).find(Boolean) || null;
+  return f._orig;
 }
 
 function renderInfo(d, f) {
@@ -540,6 +555,9 @@ function healthData() {
 
   const dup = files.filter(p => p.format === 'VST' && famFormats.get(p.family)?.has('VST3') && p.status === 'ok')
     .map(p => ({ p, why: 'VST2 copy – the VST3 is installed too' }));
+  const auAll = plugins.filter(p => p.format === 'AU');
+  const auRedundant = files.filter(p => p.format === 'AU' && auAll.filter(q => q.path === p.path).every(q => famFormats.get(q.family)?.has('VST3')))
+    .map(p => ({ p, why: 'AU copy – the VST3 is installed too' }));
   const aax = S.lib?.proTools ? [] : files.filter(p => p.format === 'AAX').map(p => ({ p, why: 'Pro Tools only' }));
   const intel = S.lib?.machine === 'arm64' ? files.filter(p => p.archs?.length && !p.archs.includes('arm64') && p.format !== 'AAX').map(p => ({ p, why: 'Intel only – does not run natively on Apple Silicon' })) : [];
   const broken = files.filter(p => p.status !== 'ok' && p.format !== 'AAX').map(p => ({ p, why: p.issue }));
@@ -556,7 +574,7 @@ function healthData() {
   const sum = a => a.reduce((s, x) => s + x.p.bytes, 0);
   const reclaim = new Map();
   for (const x of [...dup, ...aax, ...broken]) reclaim.set(x.p.path, x.p.bytes);
-  return { files, total, vst3, vst2, vst2only, au, allAax, dup, aax, intel, broken, brokenAax, liveFail, notInLive, biggest, sum, fname, reclaim: [...reclaim.values()].reduce((s, b) => s + b, 0) };
+  return { files, total, vst3, vst2, vst2only, au, auRedundant, allAax, dup, aax, intel, broken, brokenAax, liveFail, notInLive, biggest, sum, fname, reclaim: [...reclaim.values()].reduce((s, b) => s + b, 0) };
 }
 
 function renderHealth() {
@@ -564,8 +582,8 @@ function renderHealth() {
   if (!S.lib) { el.innerHTML = '<div class="empty"><h3>No scan yet</h3></div>'; return; }
   const H = healthData();
   const issues = H.intel.length + H.broken.length;
-  $('#tHealth').textContent = issues || '✓';
-  const tile = (id, label, val, sub, cls = '') => `<button class="tile ${cls}" data-jump="${id}"><small>${label}</small><b>${val}</b><span>${sub}</span></button>`;
+  $('#tHealth').textContent = issues || '';
+  const tile = (id, label, val, sub, cls = '') => `<button class="tile ${cls}" data-jump="${id}" title="${label}"><small>${label}</small><b>${val}</b><span>${sub}</span></button>`;
   const vstNotInLive = H.notInLive.filter(x => x.p.format === 'VST').length;
   const vstTotal = H.files.filter(p => p.format === 'VST').length;
   const sec = (id, title, items, why, open = false, showWhy = false, always = false) => {
@@ -578,15 +596,17 @@ function renderHealth() {
       </tbody></table></section>`;
   };
   el.innerHTML = `<div class="hhead"><div class="hrow"><h1>Health</h1>
-    <p class="lead">What plugins are on your Mac, where space is used twice and what Live cannot load. Nothing is deleted unless you confirm it; “Finder” shows the file.</p>
+    <span class="hgap"></span>
     <button class="btn sm danger" id="trashFailed" ${H.liveFail.length + H.broken.length ? '' : 'disabled'} title="Plugins Live could not use and broken bundles">Delete ${H.liveFail.length + H.broken.length} unusable</button>
     <button class="btn sm danger" id="trashIntel" ${H.intel.length ? '' : 'disabled'} title="Plugins without Apple Silicon code">Delete ${H.intel.length} Intel-only</button>
     <button class="btn sm danger" id="trashAax" ${H.aax.length ? '' : 'disabled'} title="AAX plugins only run in Pro Tools">Delete ${H.aax.length} AAX (Pro Tools only)</button>
-    ${H.dup.length ? `<button class="btn sm danger" id="trashVst2" title="Moves the VST2 copies of plugins that are installed as VST3 too to the Trash">Delete ${H.dup.length} redundant VST2 (VST3 installed)</button>` : ''}</div>
+    <button class="btn sm danger" id="trashVst2" ${H.dup.length ? '' : 'disabled'} title="Moves the VST2 copies of plugins that are installed as VST3 too to the Trash">Delete ${H.dup.length} VST2 (VST3 exists already)</button>
+    <button class="btn sm danger" id="trashAu" ${H.auRedundant.length ? '' : 'disabled'} title="Moves the AU copies of plugins that are installed as VST3 too to the Trash">Delete ${H.auRedundant.length} AUs (VST3 exists already)</button></div>
   <div class="tiles">
     ${tile('biggest', 'All plugins', fmtBytes(H.total), `${H.files.length} files`)}
     ${tile('vst3', 'VST3', H.vst3.length, fmtBytes(H.sum(H.vst3)))}
     ${tile('vst2', 'VST2', H.vst2.length, fmtBytes(H.sum(H.vst2)))}
+    ${tile('au', 'AU', H.au.length, fmtBytes(H.sum(H.au)))}
     ${tile('aax', 'AAX', H.allAax.length, fmtBytes(H.sum(H.allAax)), H.aax.length ? 'warn' : '')}
     ${tile('intel', 'Intel only', H.intel.length, fmtBytes(H.sum(H.intel)), H.intel.length ? 'err' : 'good')}
     ${tile('dup', 'VST2 that exists as VST3', H.dup.length, fmtBytes(H.sum(H.dup)), H.dup.length ? 'warn' : 'good')}
@@ -595,8 +615,8 @@ function renderHealth() {
   </div></div>
   ${sec('vst3', 'VST3 (all)', H.vst3, 'Every VST3 plugin on this Mac – the format Live prefers.', false, false, true)}
   ${sec('vst2', 'VST2 (all)', H.vst2, 'Every VST2 plugin on this Mac.', false, false, true)}
-  ${sec('dup', 'VST2 that exists as VST3', H.dup, 'The VST3 version of these plugins is installed too. Live usually takes the VST3; you only need the VST2 file for old projects that use it.', true, false, true)}
   ${sec('au', 'AU (all)', H.au, 'Every Audio Unit plugin on this Mac.', false, false, true)}
+  ${sec('dup', 'VST2 that exists as VST3', H.dup, 'The VST3 version of these plugins is installed too. Live usually takes the VST3; you only need the VST2 file for old projects that use it.', true, false, true)}
   ${sec('aax', 'AAX (all)', H.allAax, (S.lib?.proTools ? 'AAX plugins run in Pro Tools.' : 'AAX plugins only run in Pro Tools – and Pro Tools is not installed on this Mac.') + ' They live in /Library/Application Support/Avid/Audio/Plug-Ins.', false, false, true)}
   ${sec('intel', 'Intel only (all)', H.intel, 'These plugins contain no Apple Silicon code and need Rosetta. An update from the maker usually fixes this.', false, false, true)}
   ${sec('livefail', 'Couldn’t use', H.liveFail, 'The plugin scan found no usable plugin in these files – e.g. an expired licence, missing authorisation or Intel only.', false, false, true)}
@@ -653,7 +673,27 @@ async function trashVst2() {
     `${items.length} plugins are installed both as VST3 and as VST2 with the same name. The ${items.length} VST2 copies (${fmtBytes(H.sum(H.dup))}) will be moved to the Trash; the VST3 versions stay. Old Live projects that use a VST2 version will not find it any more. You can put them back from the Trash. macOS may ask for your admin password.`,
     `Move ${items.length} to Trash`);
   if (!ok) return;
+  const sure = await confirmDlg('Really move them to the Trash?',
+    `Last check: ${items.length} VST2 plugin files will be moved to the Trash now. Only the VST2 copies go – the VST3 versions stay installed.`,
+    `Yes, move ${items.length}`);
+  if (!sure) return;
   await runTrash(items, 'VST2 copies');
+}
+
+/** Moves the AU copies of plugins that also exist as VST3 to the Trash – after a clear warning. */
+async function trashAu() {
+  const H = healthData();
+  const items = H.auRedundant.map(x => x.p);
+  if (!items.length) return toast('There are no AU copies to move.', 'ok');
+  const ok = await confirmDlg('Trash the AU versions that exist as VST3?',
+    `${items.length} Audio Units (${fmtBytes(H.sum(H.auRedundant))}) are installed as VST3 too. The AU copies will be moved to the Trash; the VST3 versions stay. Live does not need them, but Logic Pro, GarageBand and other AU-only apps will not find these plugins any more. You can put them back from the Trash. macOS may ask for your admin password.`,
+    `Move ${items.length} to Trash`);
+  if (!ok) return;
+  const sure = await confirmDlg('Really move them to the Trash?',
+    `Last check: ${items.length} AU plugin files will be moved to the Trash now. Only the AU copies go – the VST3 versions stay installed.`,
+    `Yes, move ${items.length}`);
+  if (!sure) return;
+  await runTrash(items, 'AU copies');
 }
 
 async function runTrash(items, what) {
@@ -1516,6 +1556,7 @@ function bindDrawer() {
     if ('capfam' in t.dataset && f) return capture([f.key]);
     if (t.dataset.load && f) { const p = f.items.find(x => x.id === t.dataset.load); return loadFam(f, p.format, p.name); }
     if (t.dataset.reveal) return reveal(t.dataset.reveal);
+    if (t.dataset.openfam) return openInfo(t.dataset.openfam);
     const rack = S.drawer?.type === 'rack' && S.user.racks.find(r => r.id === S.drawer.id);
     if (!rack) return;
     if ('loadrack' in t.dataset) return loadRack(rack);
@@ -1604,6 +1645,7 @@ function bindPages() {
     const h = e.target.closest('[data-toggle]'); if (h) return h.parentElement.classList.toggle('open');
     if (e.target.closest('#trashVst2')) return trashVst2();
     if (e.target.closest('#trashAax')) return trashAax();
+    if (e.target.closest('#trashAu')) return trashAu();
     if (e.target.closest('#trashFailed')) return trashFailed();
     if (e.target.closest('#trashIntel')) return trashIntel();
     const j = e.target.closest('[data-jump]');

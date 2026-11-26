@@ -175,14 +175,17 @@ final class API {
             if res["ok"] as? Bool == true { res["msg"] = "\(x["name"] as? String ?? "Rack") → Live" }
             return .json(res)
         case ("POST", "/api/health/trash"):
-            // only VST2 files whose plugin is installed as VST3 too, or AAX when Pro Tools is missing; Finder moves them to the Trash (it asks for the admin password itself)
+            // only VST2/AU files whose plugin is installed as VST3 too, or AAX when Pro Tools is missing; Finder moves them to the Trash (it asks for the admin password itself)
             lock.lock(); let lib = library; lock.unlock()
             let plugins = lib?.plugins ?? []
             let vst3 = Set(plugins.filter { $0.format == "VST3" }.map { $0.family })
             let aax = lib?.proTools == true ? [] : plugins.filter { $0.format == "AAX" }.map { $0.path }
             // … plus files Live could not use, broken bundles and Intel-only files on Apple Silicon
             let unusable = plugins.filter { $0.liveFailed == true || $0.status != "ok" || (Scanner.machine == "arm64" && !$0.archs.isEmpty && !$0.archs.contains("arm64")) }.map { $0.path }
-            let allowed = Set(plugins.filter { $0.format == "VST" && vst3.contains($0.family) }.map { $0.path } + aax + unusable)
+            // AU components whose every plugin is installed as VST3 too
+            let auPaths = Set(plugins.filter { $0.format == "AU" }.map { $0.path })
+            let au = auPaths.filter { path in plugins.filter { $0.path == path }.allSatisfy { vst3.contains($0.family) } }
+            let allowed = Set(plugins.filter { $0.format == "VST" && vst3.contains($0.family) }.map { $0.path } + aax + unusable + au)
             let want = (r.json()["paths"] as? [String] ?? []).filter { allowed.contains($0) }
             guard !want.isEmpty else { return .error(400, "Nothing to move") }
             guard trashJob.running == false else { return .error(409, "Already running") }

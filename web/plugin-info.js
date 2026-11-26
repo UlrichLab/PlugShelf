@@ -39,9 +39,18 @@ PI('Pro-Q 2|Pro-Q 3|Pro-Q 4|Pro-Q', 'FabFilter’s precise digital EQ with a lar
 PI('Pro-L|Pro-L 2', 'Mastering limiter from FabFilter with several limiting algorithms and detailed loudness metering.',
   ['Version 2: eight algorithms (Transparent, Punchy, Dynamic, Allround, Aggressive, Modern, Safe, Bus)', 'True-peak limiting and oversampling', 'Loudness meter with LUFS targets'],
   ['Streaming master: ceiling −1 dBTP', 'Start with Modern or Transparent, attack and release in the middle']);
-PI('Teletronix LA-2A|LA-2A Tube Compressor|White 2A', 'Emulation of the Teletronix LA-2A optical tube leveling amplifier – smooth, program-dependent compression.',
-  ['Only two main controls: Peak Reduction and Gain', 'Compress / Limit switch', 'Slow, two-stage optical release that sounds natural on vocals and bass'],
-  ['Vocals: Peak Reduction for 3–6 dB gain reduction', 'Bass: 4–8 dB, then make-up with Gain']);
+PI('Teletronix LA-2A|LA-2A Tube Compressor|White 2A', 'Emulation of the Teletronix LA-2A optical tube leveling amplifier (1962) – smooth, program-dependent compression from an optical T4 cell.',
+  ['Attack about 10 ms, program-dependent', 'Release in two stages: about 60 ms to 50 %, then 1–15 s to full release (original Teletronix manual; UA’s current spec: 0.5–5 s)', 'Only two main controls: Peak Reduction and Gain; Compress / Limit switch'],
+  ['Typical use: vocals and bass – the all-rounder of the family', 'Vocals: Peak Reduction for 3–6 dB gain reduction', 'Bass: 4–8 dB, then make-up with Gain']);
+PI('UADx LA-2A Silver Compressor|LA-2A Silver Compressor|uaudio_teletronix_la-2a_silver', 'The late-1960s “Silver” LA-2A (brushed aluminium panel, T4B cell) – the fastest of UA’s three Teletronix models.',
+  ['Fastest time constant of the three: attack about 10 ms, quicker release than Gray and LA-2', 'More headroom; Compress / Limit switch and the R37 emphasis filter on the front panel'],
+  ['Typical use: drums, percussion and bass – where the faster response keeps up with transients', 'Drum bus or room: Limit mode, 3–5 dB gain reduction', 'Bass: Compress mode, 4–6 dB']);
+PI('UADx LA-2A Gray Compressor|LA-2A Gray Compressor|uaudio_teletronix_la-2a_gray', 'The mid-1960s “Gray” LA-2A – medium-speed optical compression between the fast Silver and the slow LA-2.',
+  ['Medium, more average time constant: attack about 10 ms, release about 60 ms to 50 %, then seconds to full release', 'Compress / Limit switch and the R37 emphasis filter on the front panel'],
+  ['Typical use: vocals, keyboards and guitars', 'Lead vocal: Compress mode, 3–6 dB gain reduction']);
+PI('UADx LA-2 Compressor|LA-2 Compressor|uaudio_teletronix_la-2', 'The early-1960s Teletronix LA-2, predecessor of the LA-2A – the slowest of the three models, with a mellow sound from its aged luminescent panel.',
+  ['Slowest response of the three; smooth, gentle leveling', 'Adds low-mid thickness while it levels'],
+  ['Typical use: legato vocals, strings and horns – less suited to fast, percussive material', 'Ballad vocal or string pad: 2–5 dB gain reduction']);
 PI('UA 1176LN Rev E|UA 1176 Rev A|UAD UA 1176 Rev A|UAD UA 1176LN Rev E|UA 1176AE|UA 1176SE|UA 1176LN|1176LN Rev E Compressor|1176 Rev A Compressor|1176AE Compressor|1176 FET Compressor|Black 76|Comp FET-76',
   'FET limiting amplifier in the style of the UREI/UA 1176 – very fast, punchy and with a forward, bright character.',
   ['Attack from 20 µs, release about 50 ms to 1.1 s; higher knob numbers are faster', 'Ratios 4, 8, 12, 20 and “all buttons in” for aggressive saturation', 'Rev A (“blue stripe”) is grittier, Rev E / LN cleaner, AE has a gentle 2:1 ratio and slower attack'],

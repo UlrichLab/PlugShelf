@@ -25,6 +25,7 @@ static const uint8_t IID_IHostApplication[16] = UID(0x58E595CC, 0xDB2D4969, 0x8B
 static const uint8_t IID_IComponentHandler[16] = UID(0x93A0BEA3, 0x0BD045DB, 0x8E890B0C, 0xC1E46AC6);
 static const uint8_t IID_IConnectionPoint[16] = UID(0x70A4156F, 0x6E6E4026, 0x989148BF, 0xAA60D8D1);
 static const uint8_t IID_IBStream[16] = UID(0xC3BF6EA2, 0x30994752, 0x9B6BF990, 0x1EE33E9B);
+static const uint8_t IID_IAudioProcessor[16] = UID(0x42043F99, 0xB7DA453C, 0xA569E79D, 0x9AAEC33D);
 static const uint8_t IID_IMessage[16] = UID(0x936F033B, 0xC6C047DB, 0xBB0882F8, 0x13C1E613);
 static const uint8_t IID_IAttributeList[16] = UID(0x1E5F0AEB, 0xCC7F4533, 0xA2544011, 0x38AD5EE4);
 
@@ -358,6 +359,24 @@ void *ph_vst3_load(const char *path, const char *className, int wantView, char *
         ((tresult (*)(void *, void *))VT(ctrl)[5])(ctrl, st);                    // IEditController::setComponentState
     }
     ((tresult (*)(void *, void *))VT(ctrl)[16])(ctrl, &g_handler);                // setComponentHandler
+
+    // Activate the plugin as a host does before showing its editor: main buses on, processing set up,
+    // component active. Some plugins (e.g. UADx) only draw their editor sharply once they are active.
+    if (wantView) {
+        typedef struct { int32_t processMode, symbolicSampleSize, maxSamplesPerBlock; double sampleRate; } ProcessSetup;
+        typedef tresult (*f_bus)(void *, int32_t, int32_t, int32_t, uint8_t);
+        f_bus activateBus = (f_bus)VT(comp)[10];                                    // IComponent::activateBus
+        int32_t (*busCount)(void *, int32_t, int32_t) = (int32_t (*)(void *, int32_t, int32_t))VT(comp)[7];
+        if (busCount(comp, 0, 0) > 0) activateBus(comp, 0, 0, 0, 1);              // audio input 0
+        if (busCount(comp, 0, 1) > 0) activateBus(comp, 0, 1, 0, 1);              // audio output 0
+        void *proc = NULL;
+        if (QI(comp, IID_IAudioProcessor, &proc) == kResultOk && proc) {
+            ProcessSetup ps = { 0, 0, 512, 48000.0 };                              // realtime, 32-bit
+            ((tresult (*)(void *, ProcessSetup *))VT(proc)[7])(proc, &ps);         // setupProcessing
+        }
+        ((tresult (*)(void *, uint8_t))VT(comp)[11])(comp, 1);                     // setActive(true)
+        if (proc) ((tresult (*)(void *, uint8_t))VT(proc)[8])(proc, 1);            // setProcessing(true)
+    }
 
     void *view = NULL;
     if (wantView) {
