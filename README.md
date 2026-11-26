@@ -1,13 +1,17 @@
 # PlugShelf
 
-PlugShelf is a macOS plugin manager and chain builder for Ableton Live. It finds installed audio plugins,
-organizes them in a searchable library, loads plugins onto Live's selected track, and creates effect,
-mix-bus, mastering, and famous-recording chains.
+PlugShelf is a macOS plugin manager and chain builder for Ableton Live. It finds installed audio plugins and
+Live's own devices, shows them with pictures and short descriptions, loads them onto Live's selected track, and
+builds effect, mix-bus, mastering, and famous-recording chains.
 
 <p>
-  <a href="docs/screenshots/library.webp"><img src="docs/screenshots/library.webp" width="32%" alt="Plugin library"></a>
-  <a href="docs/screenshots/chains.webp"><img src="docs/screenshots/chains.webp" width="32%" alt="Chain builder"></a>
-  <a href="docs/screenshots/health.webp"><img src="docs/screenshots/health.webp" width="32%" alt="Plugin health view"></a>
+  <a href="docs/screenshots/library.webp"><img src="docs/screenshots/library.webp" width="32%" alt="Plugin library with pictures"></a>
+  <a href="docs/screenshots/details.webp"><img src="docs/screenshots/details.webp" width="32%" alt="Plugin details with description"></a>
+  <a href="docs/screenshots/stock.webp"><img src="docs/screenshots/stock.webp" width="32%" alt="Ableton Live stock devices"></a>
+</p>
+<p>
+  <a href="docs/screenshots/chains.webp"><img src="docs/screenshots/chains.webp" width="32%" alt="Chain builder with a famous chain"></a>
+  <a href="docs/screenshots/health.webp"><img src="docs/screenshots/health.webp" width="32%" alt="Plugin health with clean-up"></a>
 </p>
 
 ## Download and install (for users)
