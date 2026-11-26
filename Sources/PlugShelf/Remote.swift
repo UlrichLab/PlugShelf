@@ -96,7 +96,7 @@ final class RemoteAccess {
         if r.method == "GET" && (r.path == "/" || r.path == "/remote" || r.path == "/remote/") {
             var res = HTTPResponse(status: 302); res.headers["Location"] = "/remote/index.html"; return res
         }
-        if r.method == "GET" && (r.path.hasPrefix("/remote/") || r.path == "/chain-data.js" || r.path == "/chain-famous.js" || r.path == "/chain-ua.js") {
+        if r.method == "GET" && (r.path.hasPrefix("/remote/") || r.path == "/chain-data.js" || r.path == "/chain-famous.js" || r.path == "/chain-ua.js" || r.path == "/categories.js") {
             return api.file(r.path)
         }
         if r.method == "POST" && r.path == "/api/remote/pair" {

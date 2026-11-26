@@ -10,7 +10,7 @@
 #   {"op": "inspect"}                                                    what is on the selected track
 #   {"op": "test_track", "action": "create" | "delete", ...}             scratch track for testing
 
-VERSION = "6"
+VERSION = "10"
 
 # Folder names Live uses for each plugin format in its browser.
 FORMAT_FOLDERS = {
@@ -19,6 +19,14 @@ FORMAT_FOLDERS = {
     "AU": ("audio units", "audiounits", "au", "components"),
     "CLAP": ("clap",),
 }
+
+
+def _nfc(s):
+    import unicodedata
+    try:
+        return unicodedata.normalize("NFC", s or "")
+    except Exception:
+        return s or ""
 
 
 def _norm(s):
@@ -58,6 +66,29 @@ def handle(cs, cmd):
         if missing:
             msg += " (not found: %s)" % ", ".join(missing)
         return {"ok": True, "msg": msg}
+    if op == "shot_track":
+        return shot_track(cs, cmd)
+    if op == "shot_info":
+        return shot_info(cs)
+    if op == "shot_empty":
+        t = cs.song().view.selected_track
+        if t.name != SHOT_TRACK:
+            return {"ok": False, "msg": "not the capture track"}
+        for i in range(len(t.devices) - 1, -1, -1):
+            t.delete_device(i)
+        return {"ok": True}
+    if op == "shot_clear":
+        return shot_clear(cs, cmd)
+    if op == "list_stock":
+        return {"ok": True, "devices": stock_devices(cs)}
+    if op == "load_stock":
+        item = find_stock(cs, cmd.get("name", ""), cmd.get("kind", "fx"))
+        if item is None:
+            return {"ok": False, "msg": "Live does not list %s" % cmd.get("name")}
+        if cmd.get("kind") == "inst":
+            track = free_instrument_track(cs, track)
+        cs.queue.append(item)
+        return {"ok": True, "msg": "%s → %s" % (item.name, track.name)}
     if op == "load_preset":
         item = find_preset(cs, cmd.get("folder", "PlugShelf"), cmd.get("name", ""))
         if item is None:
@@ -204,6 +235,97 @@ def kontakt_clear(cs, prefix):
     return {"ok": True, "msg": "%d builder tracks removed" % gone, "removed": gone}
 
 
+# ---- Live's own devices ("stock plugins") ------------------------------------------------
+
+def _stock_roots(cs):
+    b = cs.application().browser
+    return (("fx", b.audio_effects), ("inst", b.instruments), ("midi", b.midi_effects))
+
+
+def stock_devices(cs):
+    """Live's built-in devices from the browser: [{"name", "kind"}]."""
+    out = []
+    for kind, root in _stock_roots(cs):
+        for c in root.children:
+            if c.is_device and c.is_loadable:
+                out.append({"name": c.name, "kind": kind})
+    return out
+
+
+def find_stock(cs, name, kind):
+    want = _nfc(name).lower()
+    for k, root in _stock_roots(cs):
+        if kind and k != kind:
+            continue
+        for c in root.children:
+            if c.is_device and c.is_loadable and _nfc(c.name).lower() == want:
+                return c
+    return None
+
+
+# ---- pictures of Live's own devices: one scratch track per device -----------------------
+
+SHOT_TRACK = "PS · Capture"
+
+
+def shot_clear(cs, cmd=None):
+    song = cs.song()
+    n = 0
+    for i in range(len(song.tracks) - 1, -1, -1):
+        if song.tracks[i].name == SHOT_TRACK:
+            song.delete_track(i)
+            n += 1
+    app = cs.application()
+    if cmd and cmd.get("restore_browser"):
+        try:
+            app.view.show_view("Browser")
+        except Exception:
+            pass
+    return {"ok": True, "deleted": n}
+
+
+def shot_info(cs):
+    """Once the device has arrived on the capture track, only it stays (template devices go)."""
+    t = cs.song().view.selected_track
+    if t.name != SHOT_TRACK:
+        return {"ok": False, "msg": "not the capture track"}
+    base = getattr(cs, "shot_base", 0)
+    loaded = len(t.devices) > base and not cs.queue
+    if loaded:
+        for i in range(len(t.devices) - 2, -1, -1):
+            t.delete_device(i)
+    return {"ok": True, "loaded": loaded, "devices": [d.name for d in t.devices]}
+
+
+def shot_track(cs, cmd):
+    """A fresh scratch track with only this device on it, selected and shown in the device view."""
+    item = find_stock(cs, cmd.get("name", ""), cmd.get("kind", "fx"))
+    if item is None:
+        return {"ok": False, "msg": "Live does not list %s" % cmd.get("name")}
+    shot_clear(cs)
+    song = cs.song()
+    if cmd.get("kind") in ("inst", "midi"):
+        song.create_midi_track(-1)
+    else:
+        song.create_audio_track(-1)
+    t = song.tracks[len(song.tracks) - 1]
+    t.name = SHOT_TRACK
+    song.view.selected_track = t
+    cs.shot_base = len(t.devices)      # devices the track template brings along
+    app = cs.application()
+    browser_was = False
+    try:
+        browser_was = app.view.is_view_visible("Browser")
+        if cmd.get("hide_browser"):
+            app.view.hide_view("Browser")
+        app.view.show_view("Detail")
+        app.view.show_view("Detail/DeviceChain")
+    except Exception:
+        pass
+    cs.queue.append(item)
+    return {"ok": True, "browser": browser_was}
+
+
 def free_instrument_track(cs, track):
     """An instrument goes onto a MIDI track without one: the selected track if it is free, otherwise a new
     MIDI track right after it (an instrument already on the track is never replaced)."""
@@ -225,15 +347,16 @@ def free_instrument_track(cs, track):
 
 def find_user_item(cs, folder, name):
     """A loadable item in the User Library by file name (Live may show it with or without extension)."""
-    want = (name or "").lower()
+    # macOS file names use decomposed accents ("e" + "́"), Live's browser the composed form ("é")
+    want = _nfc(name).lower()
     stem = want.rsplit(".", 1)[0] if "." in want else want
-    folder = (folder or "").lower()
+    folder = _nfc(folder).lower()
 
     def walk(item, depth, inside):
         if depth > 8:
             return None
         for child in item.children:
-            n = child.name.lower()
+            n = _nfc(child.name).lower()
             if inside and child.is_loadable and n in (want, stem):
                 return child
             if child.is_folder or len(child.children) > 0:

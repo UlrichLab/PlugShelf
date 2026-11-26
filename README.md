@@ -57,11 +57,19 @@ configure Python themselves.
 ## Features
 
 - **Plugin library** – finds installed VST3, AU, VST2, CLAP, and AAX plugins and shows one tile per plugin.
-  Search by name, category, maker, format, favourites, collections, racks, or recently loaded plugins.
+  Search by name, category, maker, format, favourites, collections, racks, or recently loaded plugins. A plugin
+  can sit in several categories, and you can add your own categories. Optional double-click mode: a click
+  enlarges the tile and shows its details, a double-click loads it.
+- **Stock plugins** – Live's own devices (audio effects, instruments, MIDI effects) under *Stock Plugins*, or
+  mixed into the library with *+ Stock Plugins*. *Snap* takes their pictures in an empty Live set.
+- **Plugin details** – a short description of what each plugin does, what stands out and typical starting
+  settings, plus your own note.
+- **User Library racks** – the racks in Live's standard rack folders appear in the sidebar with their devices
+  and macro mappings.
 - **Only what runs** – prefers formats that run natively on the current Mac and that Live accepts: VST3 first,
   no Intel-only plugins on Apple Silicon, no AAX in Live, and no plugins rejected by Live's scan.
 - **Plugin pictures** – opens supported plugin editors briefly in isolated helper processes and captures a
-  thumbnail. A crashing plugin does not take down the main app.
+  picture (JPEG, up to 1000 px). A crashing plugin does not take down the main app.
 - **Chains** – includes 167 templates in 12 categories and 6 genres: vocals, drums, bass, mix bus, mastering,
   UAD/Apollo chains, dub techno, and 100 Famous Chains based on well-known records, engineers, and mastering
   rooms. Hardware names are matched to an installed emulation or a comparable stand-in.
@@ -79,8 +87,12 @@ configure Python themselves.
 - **Kontakt preset builder** – Setup → *Kontakt preset builder*: adds blocks of MIDI tracks with Kontakt to Live,
   one per library without a preset; once the instruments are loaded and the set is saved, *Harvest* writes a
   preset per track to User Library › Kontakt Presets.
-- **Plugin health** – reports disk use, redundant VST2/VST3 installs, AAX without Pro Tools, Intel-only and
-  broken bundles, and Live scan failures. PlugShelf does not delete plugin files.
+- **Plugin health** – lists VST3, VST2, AU and AAX plugins, VST2 copies of installed VST3s, Intel-only files and
+  plugins Live could not use. Optional clean-up moves VST2 duplicates, AAX, unusable or Intel-only plugins to the
+  Trash – always after a confirmation that lists them.
+- **Plugin versions** – Setup lists installed versions by maker with a link to each maker's updater app or
+  website; *Scan* checks for newer versions where makers publish them (FabFilter, Soundtoys, Sugar Bytes, Xfer).
+- **App updates** – at start PlugShelf checks GitHub for a newer release and can install it and restart.
 
 PlugShelf stores its user data in `~/Library/Application Support/PlugShelf/`.
 

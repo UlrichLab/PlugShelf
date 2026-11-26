@@ -1,0 +1,166 @@
+'use strict';
+/* Plugin descriptions, part C: all other makers. */
+
+// ---- Valhalla DSP ----
+PI('ValhallaDelay', 'Valhalla’s versatile delay: tape, BBD, digital, ghost and pitch modes.', ['Era modes for different vintage colours', 'Diffusion turns echoes into reverb-like washes']);
+PI('ValhallaFreqEcho', 'Free Valhalla frequency shifter combined with an analog-style echo – from subtle to sci-fi.');
+PI('ValhallaPlate', 'Valhalla’s plate reverb modelled on the behaviour of real metal plates.', ['Several plate materials', 'Dense, bright tails']);
+PI('ValhallaRoom', 'Valhalla’s algorithmic room and hall reverb with separate early and late sections.', ['Natural spaces, clean tails']);
+PI('ValhallaShimmer', 'Valhalla’s shimmer reverb – pitch-shifted feedback for huge, ethereal tails.', ['Shift +12 for octave-up shimmer']);
+PI('ValhallaSpaceModulator', 'Free Valhalla flanger/modulation effect with space-age sounds.');
+PI('ValhallaSupermassive', 'Free Valhalla reverb and delay for massive, endless spaces.', ['Many modes named after astronomy (Gemini, Andromeda …)', 'Feedback and long delays']);
+PI('ValhallaUberMod', 'Valhalla’s multi-tap delay/modulation machine for chorus, ensemble and texture.');
+
+// ---- D16 Group ----
+PI('Antresol', 'D16 Group flanger modelled on classic analog flangers.');
+PI('Decimort', 'D16 Group bit crusher and sample-rate reducer – vintage sampler grit.');
+PI('Devastor', 'D16 Group multiband distortion with filters.');
+PI('Drumazon', 'D16 Group emulation of the Roland TR-909 drum machine.', ['Analog synthesized drums', 'Pattern sequencer']);
+PI('Fazortan', 'D16 Group analog-style phaser.');
+PI('Godfazer', 'D16 Group modulation multi-effect (phaser, flanger, chorus …).');
+PI('Phoscyon', 'D16 Group emulation of the Roland TB-303 bass line.', ['Acid squelch', 'Sequencer and arpeggiator']);
+PI('Redoptor', 'D16 Group tube-style distortion.');
+PI('Spacerek', 'D16 Group reverb with simple controls.');
+PI('Syntorus', 'D16 Group chorus/flanger.');
+PI('Tekturon', 'D16 Group multi-tap delay with 16 taps and per-tap filters.');
+PI('Toraverb', 'D16 Group algorithmic reverb with modulation.');
+
+// ---- Sonnox, sonible, oeksound, TC, Softube/Weiss ----
+PI('Claro', 'Sonnox Claro – mastering and mixing EQ that combines precise EQ with dynamic “auto” bands.', ['Clean, transparent sound', 'Smart features to tame and polish a master']);
+PI('Oxford Inflator', 'Sonnox Oxford Inflator – makes a mix louder and denser without obvious limiting.', ['Effect, Curve and Clip 0 dB controls', 'A mastering classic for loudness'], ['Master: Effect 20–40 %, Curve 0']);
+PI('Oxford Limiter', 'Sonnox mastering limiter with Enhance for more loudness and true-peak control.');
+PI('smartcomp2|smartcomp', 'sonible’s AI compressor – listens to the signal and suggests settings, with spectral compression.');
+PI('smartlimit', 'sonible’s AI mastering limiter with loudness targets for streaming.');
+PI('smartreverb', 'sonible’s AI reverb that adapts to the input signal.');
+PI('truebalance', 'sonible’s tool to check the tonal balance of a mix against genre targets.');
+PI('truelevel', 'sonible’s loudness meter with streaming platform targets.');
+PI('spiff', 'oeksound’s adaptive transient processor – removes or enhances clicks, plucks and harsh attacks.');
+PI('Clarity M', 'TC Electronic loudness meter (plugin for the Clarity M hardware display).');
+PI('MD3|MD4', 'TC Electronic multiband dynamics from the System 6000 mastering processor.');
+PI('NONLIN2', 'TC Electronic’s non-linear/gated reverb from the TC classics.');
+PI('VSS3|VSS4', 'TC Electronic’s System 6000 reverbs – lush, high-end halls and rooms.');
+PI('Weiss Compressor Limiter', 'Softube emulation of the Weiss DS1-MK3 dynamics – clean mastering compression and limiting.');
+PI('Weiss DS1-MK3', 'Softube emulation of the Weiss DS1-MK3 mastering compressor/limiter/de-esser.');
+PI('Weiss DS5 Multiband Compressor', 'Weiss multiband mastering compressor.');
+PI('Weiss Deess', 'Weiss mastering de-esser with dynamic bands.');
+PI('Weiss EQ MP|Weiss EQ1', 'Softube emulation of the Weiss EQ1 – precise digital mastering EQ (minimum or linear phase).');
+PI('Weiss Exciter', 'Weiss harmonic exciter for subtle brightness.');
+PI('Weiss MM-1 Mastering Maximizer', 'Weiss one-knob mastering maximizer with several styles.');
+
+// ---- Zynaptiq ----
+PI('ADAPTIVERB', 'Zynaptiq reverb that resynthesizes the input – tonal, harmonic tails that follow the music.');
+PI('INTENSITY', 'Zynaptiq tool that reveals detail and density in a sound.');
+PI('MORPH', 'Zynaptiq real-time morphing between two sounds.');
+PI('PITCHMAP', 'Zynaptiq real-time pitch remapping of polyphonic audio – change the key or chords of a mix.');
+PI('UNCHIRP', 'Zynaptiq removes artefacts from compressed audio (MP3 “chirps”).');
+PI('UNFILTER', 'Zynaptiq removes filtering and comb effects – restores a flatter frequency response.');
+PI('UNMIX DRUMS', 'Zynaptiq turns drums up or down inside a mixed track.');
+PI('UNVEIL', 'Zynaptiq de-reverb that separates the dry signal from the room.');
+
+// ---- Synths and instruments ----
+PI('Blofeld', 'Waldorf Blofeld editor/plugin for the Blofeld virtual-analog/wavetable synth.');
+PI('Digitakt II', 'Elektron Overbridge plugin for the Digitakt II sampler/drum machine – audio and control in your DAW.');
+PI('Digitone|Digitone II', 'Elektron Overbridge plugin for the Digitone FM synth.');
+PI('ELECTRIBE-R', 'KORG’s software version of the Electribe-R drum machine.');
+PI('M1', 'KORG’s software version of the M1 workstation (1988) – the classic house organ and pianos.');
+PI('MS-20', 'KORG’s software MS-20 semi-modular synth.');
+PI('MonoPoly', 'KORG’s software Mono/Poly analog synth.');
+PI('Polysix', 'KORG’s software Polysix polysynth.');
+PI('microKORG', 'KORG’s software microKORG – virtual analog synth and vocoder.');
+PI('KAOSS PAD', 'KORG’s software KAOSS PAD – XY touch-pad multi-effect.');
+PI('MS-20FX', 'KORG MS-20 filter and effects as a plugin.');
+PI('OB-Xd', 'discoDSP’s Oberheim OB-X-inspired polysynth.');
+PI('ZENOLOGY', 'Roland’s software synth with the ZEN-Core engine (sounds from Roland hardware).');
+PI('Kontakt 7|Kontakt 8|Kontakt', 'Native Instruments’ sampler – the platform for most commercial sample libraries.');
+PI('EZkeys', 'Toontrack’s piano/keys instrument with MIDI songwriting tools.');
+PI('Lounge Lizard EP-4', 'Applied Acoustics Systems’ physically modelled electric piano (Rhodes/Wurli).');
+PI('Kick 3', 'Sonic Academy kick drum synthesizer.');
+PI('SubLabXL', 'Future Audio Workshop’s 808 and sub-bass synthesizer.');
+PI('The Legend|The Legend HZ', 'Synapse Audio’s Minimoog-style mono synth.');
+PI('Legend HZ FX', 'Synapse Audio effects section of The Legend HZ as an effect plugin.');
+PI('Soundpaint', 'Soundpaint’s sample player with its own library.');
+PI('Romplur', 'StudioLinked rompler with preset sounds.');
+PI('RX1200', 'Inphonik’s emulation of the E-mu SP-1200 sampler – gritty 12-bit drum sound.');
+PI('DrumComputer', 'Sugar Bytes drum synthesizer and sequencer.');
+PI('Dust', 'SoundMorph’s granular/texture instrument for atmospheres.');
+PI('Palindrome2', 'Glitchmachines delay/granular effect for glitches and textures.');
+PI('RapidComposer', 'Music Developments’ MIDI composition tool for chords, melodies and arrangements.');
+PI('multiclock|E-RM - multiclock', 'E-RM multiclock companion plugin – sends tight clock and sync from the DAW to hardware.');
+PI('TugMidiSeq', 'MIDI step sequencer plugin.');
+PI('Scaler 2|ScalerAudio 2', 'Scaler 2 – chord and scale tool: detects keys, suggests progressions and performs them.');
+PI('Scaler Detector|Scaler Detector Audio', 'Scaler tool that detects key and chords from MIDI or audio.');
+PI('Scaler EQ|Scaler EQ Pro', 'Scaler’s EQ that snaps bands to the musical key.');
+PI('Bass Slapper', 'Waves slap bass instrument.');
+
+// ---- Effects from other makers ----
+PI('APU Loudness Compressor|APU Loudness Limiter', 'APU Software’s loudness-oriented compressor / limiter.');
+PI('Auto-Tune Pro', 'Antares Auto-Tune Pro – pitch correction from natural to the classic hard-tune effect.', ['Auto and Graph mode', 'Flex-Tune and Humanize'], ['Hard effect: Retune 0, correct key']);
+PI('Transpanner', 'Artists in DSP binaural/surround panner.');
+PI('Pitch Drift', 'BABY Audio – adds human pitch drift and wobble to vocals and synths.');
+PI('Low Control', 'Black Salt Audio low-end processor.');
+PI('Silencer', 'Black Salt Audio noise remover/gate.');
+PI('Transgressor', 'Boz Digital Labs transient shaper with filters.');
+PI('MidiShaper', 'Cableguys MIDI LFO/envelope that automates any parameter.');
+PI('ShaperBox', 'Cableguys multi-effect of drawn LFO shapes: volume, filter, pan, time, distortion and more.', ['Classic for sidechain pumping and rhythmic movement']);
+PI('H3000 Factory', 'Eventide H3000 harmonizer emulation – pitch, delay, modulation and the famous micro-shift.');
+PI('Precision Time Align', 'Eventide tool to align the timing and phase of multi-mic recordings.');
+PI('Chain Follower|Chain Leader', 'Excite Audio sidechain tools – a “leader” sends, “followers” duck or move in response.');
+PI('Motion Harmonic', 'Excite Audio harmonic/modulation effect for movement in sounds.');
+PI('VISION 4X', 'Excite Audio visual analyser for spectrum, stereo and levels.');
+PI('FKFX Vocal Freeze', 'Vocal freeze/drone effect.');
+PI('RipLink', 'Hit’n’Mix link plugin between the DAW and the RipX audio editor.');
+PI('HoRNetChorus60', 'HoRNet chorus modelled on a classic 60s/70s chorus.');
+PI('The Kiss Of Shame', 'Tape emulation with worn, damaged-tape character (Infernal Love/Waves).');
+PI('kikzilla', 'Kick drum processing/generating plugin.');
+PI('MJUC', 'Klanghelm variable-mu tube compressor with three vintage modes.');
+PI('VUMTdeluxe', 'Klanghelm VU meter.');
+PI('MLimiterX', 'MeldaProduction limiter with many algorithms.');
+PI('MModernCompressor', 'MeldaProduction modern compressor.');
+PI('MReverb|MReverbMB|MTurboReverb|MTurboReverbMB', 'MeldaProduction reverbs (MB = multiband, Turbo = many algorithms in one).');
+PI('MSaturatorMB', 'MeldaProduction multiband saturator.');
+PI('MTurboComp|MTurboCompMB', 'MeldaProduction compressor with many vintage models in one plugin.');
+PI('MTurboDelay|MTurboDelayMB', 'MeldaProduction delay with many delay models.');
+PI('Digital Echoes', 'NNAudio digital echo effect.');
+PI('Subhoofer', 'Nih-plug sub-harmonic bass enhancer.');
+PI('HPL Processor Ultimate', 'NovoNotes headphone processor for listening to surround/Atmos mixes on headphones.');
+PI('Portal', 'Output’s granular effect – turns any sound into evolving textures.');
+PI('Filtron', 'Polyverse filter effect.');
+PI('P42 Climax|P44 Magnum|P455 MDN Sidecar', 'Pulsar Modular analog-modelled studio processors.');
+PI('SoundID Reference Plugin', 'Sonarworks speaker and headphone calibration – corrects your monitoring.');
+PI('SoundID VoiceAI', 'Sonarworks AI voice and instrument transformer.');
+PI('EnergyPanner', 'Sound Particles panner that moves sounds by energy and rhythm.');
+PI('Kraftur|Kraftur Focus', 'Sound Theory multiband saturation.');
+PI('ParametricOD', 'Steven Atkinson’s neural amp modeler style overdrive/parametric distortion.');
+PI('DIG', 'Strymon DIG – dual digital delay inspired by 80s rack delays.');
+PI('Deco', 'Strymon Deco – tape saturation and doubletracker (flanging, chorus, slapback).');
+PI('El Capistan', 'Strymon El Capistan – tape echo with several tape machine types.');
+PI('Effectrix2|Effectrix', 'Sugar Bytes step-sequenced multi-effect for glitches and stutters.');
+PI('Graindad', 'Sugar Bytes granular effect.');
+PI('Turnado', 'Sugar Bytes multi-effect with eight macro knobs for live effect performance.');
+PI('DSEQ3', 'TBProAudio dynamic spectral EQ.');
+PI('ST1V2', 'TBProAudio stereo tool.');
+PI('Unfiltered Audio Silo', 'Unfiltered Audio granular/space effect.');
+PI('SPAN Plus|Voxengo SPAN Plus', 'Voxengo SPAN Plus – spectrum analyser with loudness and correlation metering.');
+PI('LoFi - Drifter|LoFi - Flux Machine|LoFi - Tapestop', 'Yum Audio lo-fi effects (pitch drift, tape flux, tape stop).');
+PI('Spread', 'Yum Audio stereo widener.');
+PI('drumclone', 'raredsp drum replacer/cloner.');
+PI('teleVU', 'take a while VU meter.');
+PI('Trackspacer|Trackspacer 2.5', 'Wavesfactory Trackspacer – sidechain EQ that carves space for one track using another.', ['32 bands follow the sidechain signal'], ['Bass vs kick: sidechain from kick, Amount 40–60 %']);
+PI('PitchMonster', 'Devious Machines pitch-shift/harmonize effect.');
+PI('AK9X|S12X|Samplex3', 'Beatskillz lo-fi/sampler emulation effects.');
+
+// ---- Waves ----
+PI('Magma BB Tubes', 'Waves tube saturation/compression with four tube styles (Magma series).');
+PI('Magma Lil Tube', 'Waves simple tube saturation.');
+PI('Dorrough', 'Waves emulation of the Dorrough loudness meters.');
+PI('C360|C360 5.0|C360 5.1', 'Waves surround compressor (360° series).');
+PI('Dorrough360 5.0|Dorrough360 5.1', 'Waves Dorrough meter for surround.');
+PI('IDR360 5.0|IDR360 5.1', 'Waves surround dither/word-length reduction.');
+PI('L360 5.0|L360 5.1', 'Waves surround limiter.');
+PI('LFE360|LFE360 5.1', 'Waves low-frequency effects (LFE) filter for surround.');
+PI('LoAir|LoAir 5.0/5.1|LoAir 5.1', 'Waves sub-harmonic generator for deep low end.');
+PI('M360 Manager 5.0|M360 Manager 5.0/5.1|M360 Manager 5.1|M360 Mixdown 5.0|M360 Mixdown 5.1', 'Waves surround monitoring and mixdown tools.');
+PI('MV360 5.0|MV360 5.1', 'Waves surround dynamics (MaxxVolume-style).');
+PI('R360|R360 5.0|R360 5.1', 'Waves surround reverb.');
+PI('S360 Imager|S360 Imager 5.0|S360 Imager 5.1|S360 Panner', 'Waves surround imager and panner.');
+PI('UM225|UM226', 'Waves stereo-to-surround upmixers.');

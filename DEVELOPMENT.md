@@ -36,7 +36,7 @@ Run the verification script against either an app bundle or a release archive:
 
 ```bash
 ./scripts/verify-release.sh build/PlugShelf.app
-./scripts/verify-release.sh PlugShelf-0.2.0-mac.zip
+./scripts/verify-release.sh PlugShelf-0.3.0-mac.zip
 ```
 
 The script verifies the bundle signature, both processor slices, the minimum macOS version, required resources,
@@ -66,6 +66,9 @@ Ableton Live versions and third-party plugins.
 | Rack macros, starting values, `.adg` writer | `Racks.swift`, `RackWriter.swift`, `RackTemplates.swift` |
 | Kontakt libraries, presets, preset builder | `Kontakt.swift`, `KontaktBuilder.swift`, `web/kontakt.js` |
 | iPad / iPhone remote (pairing, second server) | `Remote.swift`, `web/remote/` |
+| Stock devices, their pictures, rack details | `StockShots.swift`, `RackInfo.swift`, `web/stock.js`, `web/userracks.js` |
+| Plugin descriptions and categories | `web/plugin-info*.js`, `web/categories.js` |
+| App updates, maker links, version scan | `Updater.swift`, `Makers.swift`, `VersionCheck.swift` |
 | VST3 and VST2 mini host | `Sources/CPlugHost/` |
 | User interface | `web/` |
 | Chain roles, categories, and templates | `web/chain-data.js`, `web/chain-famous.js`, `web/chain-ua.js`, `web/chains.js` |

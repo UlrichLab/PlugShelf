@@ -48,7 +48,7 @@ final class API {
     // MARK: routing
 
     func handle(_ r: HTTPRequest) -> HTTPResponse {
-        if r.path.hasPrefix("/thumbs/") { return thumb(r.path) }
+        if r.path.hasPrefix("/thumbs/") { return thumb(r.path, size: r.query["s"]) }
         if r.path.hasPrefix("/kontakt/art/") { return kontaktArt(r.path) }
         if !r.path.hasPrefix("/api/") { return file(r.path) }
         switch (r.method, r.path) {
@@ -96,6 +96,116 @@ final class API {
             if b["newCode"] as? Bool == true { remote.newCode() }
             if b["forget"] as? Bool == true { remote.forget() }
             return .json(remote.status())
+        case ("GET", "/api/versions"):
+            var o = versionCheck.last()
+            let pr = versionCheck.progress
+            o["running"] = pr.running; o["done"] = pr.done; o["total"] = pr.total
+            return .json(o)
+        case ("POST", "/api/versions/scan"):
+            lock.lock(); let plugins = library?.plugins ?? []; lock.unlock()
+            var by: [String: (name: String, vendor: String, versions: [String])] = [:]
+            for p in plugins where p.format != "AAX" && !p.version.isEmpty {
+                var e = by[p.family] ?? (name: p.display.isEmpty ? p.name : p.display, vendor: p.vendor, versions: [])
+                e.versions.append(p.version)
+                by[p.family] = e
+            }
+            versionCheck.run(by.map { (key: $0.key, name: $0.value.name, vendor: $0.value.vendor, versions: $0.value.versions) })
+            return .json(["ok": true])
+        case ("GET", "/api/makers"):
+            // each maker's updater app (when installed) or download page, for the plugin version list
+            lock.lock(); let vendors = Set((library?.plugins ?? []).map { $0.vendor }.filter { !$0.isEmpty }); lock.unlock()
+            return .json(Makers.links(vendors))
+        case ("POST", "/api/makers/open"):
+            let v = r.json()["vendor"] as? String ?? ""
+            lock.lock(); let known = (library?.plugins ?? []).contains { $0.vendor == v }; lock.unlock()
+            guard known else { return .error(404, "Unknown maker") }
+            return .json(Makers.open(vendor: v, how: r.json()["how"] as? String ?? "app"))
+        case ("GET", "/api/update"):
+            return .json(updater.check(force: r.query["force"] == "1"))
+        case ("POST", "/api/update/install"):
+            updater.install()
+            return .json(["ok": true])
+        case ("GET", "/api/update/state"):
+            let st = updater.state
+            return .json(["phase": st.phase, "msg": st.msg])
+        case ("GET", "/api/stock"):
+            // Live's own devices, asked from the Live script and kept for when Live is closed
+            let file = Paths.support.appendingPathComponent("stock.json")
+            let res = Ableton.send(["op": "list_stock"], timeout: 2)
+            if res["ok"] as? Bool == true, let devs = res["devices"] as? [[String: Any]], !devs.isEmpty,
+               let d = try? JSONSerialization.data(withJSONObject: devs) {
+                try? d.write(to: file, options: .atomic)
+                return .json(["devices": devs, "live": true])
+            }
+            let cached = (try? Data(contentsOf: file)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [[String: Any]] ?? []
+            return .json(["devices": cached, "live": false])
+        case ("GET", "/api/stock/shots"):
+            let pr = stockShots.progress
+            return .json(["running": pr.running, "done": pr.done, "total": pr.total, "ok": pr.ok, "failed": pr.failed, "current": pr.current, "last": pr.last, "permitted": StockShots.permitted])
+        case ("POST", "/api/stock/shots"):
+            let b = r.json()
+            if b["cancel"] as? Bool == true { stockShots.cancel(); return .json(["ok": true]) }
+            guard StockShots.permitted else {
+                DispatchQueue.main.async { StockShots.askPermission() }
+                return .json(["ok": false, "permission": true, "msg": "PlugShelf needs Screen Recording: allow it under System Settings → Privacy & Security → Screen Recording, then start again."])
+            }
+            let file = Paths.support.appendingPathComponent("stock.json")
+            var devs = (try? Data(contentsOf: file)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [[String: Any]] ?? []
+            if let only = b["names"] as? [String], !only.isEmpty { devs = devs.filter { only.contains($0["name"] as? String ?? "") } }
+            guard !devs.isEmpty else { return .json(["ok": false, "msg": "No stock devices known yet – open Live first."]) }
+            guard Ableton.send(["op": "ping"], timeout: 1)["ok"] as? Bool == true else { return .json(["ok": false, "offline": true, "msg": "Live is not connected"]) }
+            stockShots.start(devs) { [weak self] fam, png in self?.thumbs.store(fam, png: png, source: "live") }
+            return .json(["ok": true, "total": devs.count])
+        case ("POST", "/api/stock/load"):
+            let b = r.json()
+            return .json(Ableton.send(["op": "load_stock", "name": b["name"] as? String ?? "", "kind": b["kind"] as? String ?? "fx"], timeout: 2))
+        case ("GET", "/api/userracks"):
+            return .json(API.userRacks())
+        case ("GET", "/api/userracks/info"):
+            let want = r.query["id"] ?? ""
+            guard let x = API.userRacks().first(where: { $0["id"] as? String == want }), let rel = x["rel"] as? String,
+                  let lib = Ableton.userLibrary() else { return .error(404, "Rack not found") }
+            lock.lock(); let l = library; lock.unlock()
+            return .json(RackInfo.info(lib.appendingPathComponent(rel), library: l))
+        case ("POST", "/api/userracks/load"):
+            let want = r.json()["id"] as? String ?? ""
+            guard let x = API.userRacks().first(where: { $0["id"] as? String == want }) else { return .error(404, "Rack not found") }
+            let kind = x["kind"] as? String ?? "fx"
+            var res = Ableton.send(["op": "load_user", "folder": x["folder"] ?? "", "name": x["file"] ?? "", "instrument": kind == "inst" || kind == "drum"], timeout: 2)
+            if res["ok"] as? Bool == true { res["msg"] = "\(x["name"] as? String ?? "Rack") → Live" }
+            return .json(res)
+        case ("POST", "/api/health/trash"):
+            // only VST2 files whose plugin is installed as VST3 too, or AAX when Pro Tools is missing; Finder moves them to the Trash (it asks for the admin password itself)
+            lock.lock(); let lib = library; lock.unlock()
+            let plugins = lib?.plugins ?? []
+            let vst3 = Set(plugins.filter { $0.format == "VST3" }.map { $0.family })
+            let aax = lib?.proTools == true ? [] : plugins.filter { $0.format == "AAX" }.map { $0.path }
+            // … plus files Live could not use, broken bundles and Intel-only files on Apple Silicon
+            let unusable = plugins.filter { $0.liveFailed == true || $0.status != "ok" || (Scanner.machine == "arm64" && !$0.archs.isEmpty && !$0.archs.contains("arm64")) }.map { $0.path }
+            let allowed = Set(plugins.filter { $0.format == "VST" && vst3.contains($0.family) }.map { $0.path } + aax + unusable)
+            let want = (r.json()["paths"] as? [String] ?? []).filter { allowed.contains($0) }
+            guard !want.isEmpty else { return .error(400, "Nothing to move") }
+            guard trashJob.running == false else { return .error(409, "Already running") }
+            trashJob = (true, want.count, 0, nil)
+            DispatchQueue.global().async { [self] in
+                let list = want.map { "POSIX file \"" + $0.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\"" }.joined(separator: ", ")
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+                p.arguments = ["-e", "tell application \"Finder\" to delete {\(list)}"]
+                let err = Pipe(); p.standardError = err; p.standardOutput = Pipe()
+                var msg: String? = nil
+                do { try p.run(); p.waitUntilExit() } catch { msg = error.localizedDescription }
+                if p.terminationStatus != 0 && msg == nil { msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                let moved = want.filter { !FileManager.default.fileExists(atPath: $0) }.count
+                trashJob = (false, want.count, moved, msg)
+                if moved > 0 { startScan() }
+            }
+            return .json(["ok": true, "started": want.count])
+        case ("GET", "/api/health/trash"):
+            let j = trashJob
+            var o: [String: Any] = ["running": j.running, "total": j.total, "moved": j.moved]
+            if let m = j.error { o["error"] = m }
+            return .json(o)
         case ("POST", "/api/scan"):
             startScan()
             return .json(["ok": true])
@@ -205,11 +315,22 @@ final class API {
         return .json(["ok": true, "queued": jobs.count, "skipped": skipped])
     }
 
-    private func thumb(_ path: String) -> HTTPResponse {
+    /// /thumbs/<id>.jpg – the picture (max 1000 px); ?s=tile – a small JPEG for the grid; ?s=blur – a tiny JPEG for the blurred backdrop.
+    /// Small versions are made once and kept next to the capture (thumbs/small/), so scrolling decodes far less.
+    private func thumb(_ path: String, size: String? = nil) -> HTTPResponse {
         let name = String(path.dropFirst("/thumbs/".count))
-        guard name.range(of: #"^[0-9a-f]{16}\.png$"#, options: .regularExpression) != nil,
-              let d = try? Data(contentsOf: Thumbs.dir.appendingPathComponent(name)) else { return .error(404, "No picture") }
-        var res = HTTPResponse.data(d, type: "image/png")
+        guard name.range(of: #"^[0-9a-f]{16}\.(png|jpg)$"#, options: .regularExpression) != nil else { return .error(404, "No picture") }
+        // pictures are JPEGs now; an old PNG is used until it has been converted
+        let base = String(name.prefix(16))
+        var src = Thumbs.dir.appendingPathComponent(base + ".jpg")
+        if !FileManager.default.fileExists(atPath: src.path) { src = Thumbs.dir.appendingPathComponent(base + ".png") }
+        var res: HTTPResponse
+        if let size, let px = ["tile": 520, "blur": 24][size], let d = Thumbs.small(src, maxPixels: px, tag: size) {
+            res = HTTPResponse.data(d, type: "image/jpeg")
+        } else {
+            guard let d = try? Data(contentsOf: src) else { return .error(404, "No picture") }
+            res = HTTPResponse.data(d, type: src.pathExtension == "png" ? "image/png" : "image/jpeg")
+        }
         res.headers["Cache-Control"] = "max-age=31536000"   // the URL carries a version
         return res
     }
@@ -268,6 +389,30 @@ final class API {
 
     // MARK: Kontakt
 
+    /// Racks saved in the User Library's standard rack folders (Presets › Instruments › Instrument Rack etc.).
+    static func userRacks() -> [[String: Any]] {
+        guard let lib = Ableton.userLibrary() else { return [] }
+        let kinds: [(String, String)] = [("inst", "Presets/Instruments/Instrument Rack"), ("drum", "Presets/Instruments/Drum Rack"),
+                                         ("fx", "Presets/Audio Effects/Audio Effect Rack"), ("midi", "Presets/MIDI Effects/MIDI Effect Rack")]
+        var out: [[String: Any]] = []
+        for (kind, sub) in kinds {
+            let base = lib.appendingPathComponent(sub)
+            guard let en = FileManager.default.enumerator(at: base, includingPropertiesForKeys: [.contentModificationDateKey]) else { continue }
+            for case let u as URL in en where u.pathExtension.lowercased() == "adg" {
+                let rel = String(u.path.dropFirst(lib.path.count + 1))
+                let folder = u.deletingLastPathComponent().lastPathComponent
+                let mtime = (try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate?.timeIntervalSince1970) ?? 0
+                out.append(["id": Classify.stableId(rel), "rel": rel, "name": u.deletingPathExtension().lastPathComponent, "kind": kind,
+                            "folder": folder, "file": u.lastPathComponent, "sub": u.deletingLastPathComponent().path == base.path ? "" : folder,
+                            "mtime": (mtime ?? 0) * 1000])
+            }
+        }
+        return out.sorted { ($0["name"] as! String).localizedCaseInsensitiveCompare($1["name"] as! String) == .orderedAscending }
+    }
+    let stockShots = StockShots()
+    let updater = Updater()
+    let versionCheck = VersionCheck()
+    private var trashJob: (running: Bool, total: Int, moved: Int, error: String?) = (false, 0, 0, nil)
     private var kontaktCache: (at: Date, libs: [Kontakt.Library])?
     func kontaktLibraries(refresh: Bool = false) -> [Kontakt.Library] {
         lock.lock(); let c = kontaktCache; lock.unlock()
@@ -313,7 +458,7 @@ final class API {
         }
         var u: [String: Any] = [:]
         if let o = (try? JSONSerialization.jsonObject(with: user.data())) as? [String: Any] {
-            for k in ["favs", "hidden", "collections", "lastUsed", "usage", "overrides"] { u[k] = o[k] }
+            for k in ["favs", "hidden", "collections", "lastUsed", "usage", "overrides", "customCats"] { u[k] = o[k] }
             let st = o["settings"] as? [String: Any] ?? [:]
             u["settings"] = ["prefer": st["prefer"] ?? NSNull(), "showAAX": st["showAAX"] ?? false]
         }

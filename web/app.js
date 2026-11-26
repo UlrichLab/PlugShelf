@@ -58,6 +58,7 @@ const CATS = {
   Mastering: { label: 'Mastering', hue: 40, i: I.master },
   Analyzer: { label: 'Analysis', hue: 125, i: I.meter },
   Restoration: { label: 'Restoration', hue: 100, i: I.spark },
+  Creative: { label: 'Creative & multi-FX', hue: 290, i: I.mod },
   Utility: { label: 'Utilities', hue: 210, i: I.tool },
   MIDI: { label: 'MIDI', hue: 215, i: I.midi },
   Other: { label: 'Other', hue: 220, i: I.dot },
@@ -110,8 +111,32 @@ const native = p => !p.archs?.length || p.archs.includes('arm64') || S.lib?.mach
 /** A plugin file PlugShelf may use: intact, not AAX, runs natively on this Mac, and Live did not reject it. */
 const usable = p => p.status === 'ok' && p.format !== 'AAX' && native(p) && !p.liveFailed;
 
+/* ---------- own categories ---------- */
+const CUSTOM_HUES = [12, 48, 95, 160, 200, 250, 290, 330];
+function applyCustomCats() {
+  for (const k of Object.keys(CATS)) if (k.startsWith('u:')) delete CATS[k];
+  for (const c of S.user?.customCats || []) CATS[c.id] = { label: c.label, hue: c.hue, i: I.dot, own: true };
+}
+async function newCategory() {
+  const name = await ask('New category', 'Shown at the end of the category list. Add plugins to it in their details panel (Category).');
+  if (!name) return;
+  const list = (S.user.customCats ||= []);
+  list.push({ id: 'u:' + Date.now().toString(36), label: name, hue: CUSTOM_HUES[list.length % CUSTOM_HUES.length] });
+  saveUser(); rebuild(); renderLib();
+}
+function removeCategory(id) {
+  S.user.customCats = (S.user.customCats || []).filter(c => c.id !== id);
+  for (const o of Object.values(S.user.overrides || {})) {
+    if (o.also) o.also = o.also.filter(x => x !== id);
+    if (o.category === id) { o.category = o.also?.shift(); if (!o.category) { delete o.category; delete o.also; } }
+  }
+  if (S.f.cat === id) S.f.cat = null;
+  saveUser(); rebuild(); renderLib(); renderDrawer();
+}
+
 /* ---------- families ---------- */
 function rebuild() {
+  applyCustomCats();
   const by = new Map();
   for (const p of S.lib?.plugins || []) {
     let a = by.get(p.family);
@@ -131,17 +156,19 @@ function rebuild() {
       name: o.name || b.display || b.name,
       vendor: b.vendor || 'Unknown',
       kind: o.kind || b.kind,
-      category: o.category || b.category,
+      category: o.category || fixCategory(o.name || b.display || b.name, b.category)[0],
+      also: o.also || (o.category ? [] : fixCategory(o.name || b.display || b.name, b.category).slice(1)),
       formats: [...new Set(items.map(p => p.format))].sort((x, y) => fmtRank(x) - fmtRank(y)),
       bytes: [...paths.values()].reduce((s, x) => s + x, 0),
       mtime: Math.max(...items.map(p => p.mtime || 0)),
     };
     f.loadable = items.some(usable);
-    f.hay = [f.name, f.vendor, cat(f.category).label, f.category, KIND_NAME[f.kind], ...f.formats.map(x => FMT_LABEL[x]), ...new Set(items.map(p => p.name)), S.user.notes?.[key] || ''].join(' ').toLowerCase();
+    f.hay = [f.name, f.vendor, cat(f.category).label, f.category, ...f.also.map(x => cat(x).label), KIND_NAME[f.kind], ...f.formats.map(x => FMT_LABEL[x]), ...new Set(items.map(p => p.name)), S.user.notes?.[key] || ''].join(' ').toLowerCase();
     S.fams.push(f);
     S.famBy.set(key, f);
   }
-  $('#tLib').textContent = S.fams.filter(f => showable(f)).length;
+  if (typeof addStockFams === 'function') addStockFams();
+  $('#tLib').textContent = S.fams.filter(f => showable(f) && !f.stock).length;
 }
 
 const showable = f => settings().showAAX || f.formats.some(x => x !== 'AAX');
@@ -173,12 +200,15 @@ function passes(f, skip = '') {
   if (F.coll === 'recent' && !u.lastUsed[f.key]) return false;
   if (F.coll === 'new' && f.mtime < Date.now() - 30 * 864e5) return false;
   if (F.coll === 'uad' && !isUAD(f)) return false;
+  // Live's own devices: always under "Stock Plugins", elsewhere in the library only with "+ Stock Plugins"
+  if (F.coll === 'stock' && !f.stock) return false;
+  if (f.stock && !F.coll && !settings().showStock) return false;
   if (F.coll?.startsWith('c:')) {
     const c = u.collections.find(x => x.id === F.coll.slice(2));
     if (!c || !c.items.includes(f.key)) return false;
   }
   if (F.kind !== 'all' && f.kind !== F.kind) return false;
-  if (skip !== 'cat' && F.cat && f.category !== F.cat) return false;
+  if (skip !== 'cat' && F.cat && f.category !== F.cat && !f.also?.includes(F.cat)) return false;
   if (skip !== 'maker' && F.maker && f.vendor !== F.maker) return false;
   if (F.formats.size && !f.formats.some(x => F.formats.has(x))) return false;
   if (F.q && score(f) <= 0) return false;
@@ -229,6 +259,8 @@ function cardHTML(f, i, extra = '') {
   const c = cat(f.category), fav = S.user.favs.includes(f.key);
   const fm = f.formats.filter(x => x !== 'AAX' || settings().showAAX);
   const pic = picsOn() && S.pics.thumbs[f.key];
+  if (i >= 0 && settings().dblLoad && S.bigKey === f.key) extra += ' big';
+  const bigCss = i >= 0 && settings().dblLoad && S.bigKey === f.key ? bigStyle() : '';
   const favSvg = fav ? '<svg class="favmark" viewBox="0 0 24 24"><path d="m12 2.8 2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg>' : '';
   const acts = `<div class="acts">
       <button data-act="fav" title="${fav ? 'Remove from favourites' : 'Add to favourites'}">${fav ? '★' : '☆'}</button>
@@ -236,15 +268,15 @@ function cardHTML(f, i, extra = '') {
       <button data-act="menu" title="More">${svg('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>')}</button>
     </div>`;
   if (pic) {
-    return `<div class="card pic${i === S.sel && (S.kbd || S.f.q) ? ' sel' : ''}${f.loadable ? '' : ' dead'}${extra}" data-k="${esc(f.key)}" data-i="${i}" draggable="true" style="--h:${c.hue}">
+    return `<div class="card pic${i === S.sel && (S.kbd || S.f.q) ? ' sel' : ''}${f.loadable ? '' : ' dead'}${extra}" data-k="${esc(f.key)}" data-i="${i}" draggable="true" style="--h:${c.hue};${bigCss}">
   <div class="face">
-    <img class="bg" src="${esc(pic)}" alt="" loading="lazy" decoding="async"><img class="fg" src="${esc(pic)}" alt="" loading="lazy" decoding="async">
+    <img class="bg" src="${esc(pic)}&s=blur" alt="" loading="lazy" decoding="async"><img class="fg" src="${esc(pic)}${i === -2 ? '' : '&s=tile'}" alt="" loading="lazy" decoding="async">
     <div class="cap"><div class="t"><b>${esc(f.name)}</b><small>${esc(f.vendor)}</small></div><span class="fmts">${fm.map(x => `<b>${FMT_LABEL[x]}</b>`).join('')}</span></div>
     <i class="led ${f.kind}" title="${KIND_NAME[f.kind]}"></i>${favSvg}${acts}
   </div>
 </div>`;
   }
-  return `<div class="card${i === S.sel && (S.kbd || S.f.q) ? ' sel' : ''}${f.loadable ? '' : ' dead'}${extra}" data-k="${esc(f.key)}" data-i="${i}" draggable="true" style="--h:${c.hue}">
+  return `<div class="card${i === S.sel && (S.kbd || S.f.q) ? ' sel' : ''}${f.loadable ? '' : ' dead'}${extra}" data-k="${esc(f.key)}" data-i="${i}" draggable="true" style="--h:${c.hue};${bigCss}">
   <div class="face">
     <div class="fv">${esc(f.vendor)}</div>
     <div class="fn">${esc(f.name)}</div>
@@ -270,6 +302,7 @@ function renderLib() {
   }
   renderSide();
   if (typeof isKontaktView === 'function' && isKontaktView()) { renderKontakt(); renderBanner(); return; }
+  if (typeof isUserRackView === 'function' && isUserRackView()) { renderUserRacks(); renderBanner(); return; }
   let list = sorted(S.fams.filter(f => passes(f)));
   // UAD view: grouped by category, in the sidebar's category order, then by name
   const grouped = S.f.coll === 'uad' && !S.f.q && !S.f.cat;
@@ -286,6 +319,7 @@ function renderLib() {
   else if (F.coll === 'recent') title = 'Recently loaded';
   else if (F.coll === 'new') title = 'Newly installed (30 days)';
   else if (F.coll === 'uad') title = 'UAD Plugins';
+  else if (F.coll === 'stock') title = 'Stock Plugins';
   else if (F.coll === 'hidden') title = 'Hidden';
   else if (F.coll?.startsWith('c:')) title = S.user.collections.find(x => x.id === F.coll.slice(2))?.name || 'Collection';
   const sub = [F.cat && cat(F.cat).label, F.maker].filter(Boolean);
@@ -305,6 +339,7 @@ function renderLib() {
   $('#shelfWrap').hidden = !(plain && top.length >= 3);
   if (!$('#shelfWrap').hidden) $('#shelf').innerHTML = top.map(f => cardHTML(f, -1)).join('');
 
+  $('#grid').classList.toggle('dblmode', !!settings().dblLoad);
   $('#grid').innerHTML = list.map((f, i) => {
     const head = grouped && (i === 0 || list[i - 1].category !== f.category)
       ? `<div class="grp" style="--h:${cat(f.category).hue}"><i class="dot"></i>${esc(cat(f.category).label)}<span>${list.filter(x => x.category === f.category).length}</span></div>` : '';
@@ -324,6 +359,13 @@ function showEmpty(html) { $('#empty').innerHTML = html; $('#empty').hidden = fa
 
 function renderBanner() {
   const b = $('#banner');
+  const up = S.update?.available && settings().skipVersion !== S.update.latest;
+  if (up) {
+    b.hidden = false;
+    b.innerHTML = `<div><b>PlugShelf ${esc(S.update.latest)} is available</b> – you have ${esc(S.update.current)}.</div><div class="grow"></div>
+      <button class="btn sm" data-update-notes>What’s new</button><button class="btn sm pri" data-update-install>Install &amp; restart</button><button class="x" data-update-skip title="Not now">×</button>`;
+    return;
+  }
   const need = S.script && (!S.script.installed || !S.script.current) && !S.daw.ok && !settings().bannerOff;
   b.hidden = !need;
   if (!need) return;
@@ -332,11 +374,14 @@ function renderBanner() {
 
 function renderSide() {
   const u = S.user, F = S.f;
-  const base = S.fams.filter(f => showable(f) && !u.hidden.includes(f.key));
+  const base = S.fams.filter(f => showable(f) && !u.hidden.includes(f.key) && !f.stock);
+  const stockN = S.fams.filter(f => f.stock && !u.hidden.includes(f.key)).length;
   const it = (key, label, n, icon, extra = '') => `<button class="item${F.coll === key ? ' on' : ''}" data-coll="${key ?? ''}" ${extra}>${icon}<span class="t">${esc(label)}</span><span class="n">${n}</span></button>`;
   const newCount = base.filter(f => f.mtime >= Date.now() - 30 * 864e5).length;
   let h = `<h4>Library</h4>
     ${it(null, 'All plugins', base.length, svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>'))}
+    <label class="item chk" title="Show Live's own devices in All plugins and the categories too"><input type="checkbox" id="showStock" ${settings().showStock ? 'checked' : ''}><span class="t">+ Stock Plugins</span><button class="link snap" id="stockShots" title="Take pictures of the stock plugins (in an empty Live set)">${svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>')}Snap</button></label>
+    ${stockN ? it('stock', 'Stock Plugins', stockN, svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h2M7 13h2M7 17h2M12 9v8M16 9v8"/>')) : ''}
     ${it('favs', 'Favourites', u.favs.filter(k => S.famBy.has(k)).length, svg('<path d="m12 3 2.6 5.5 6 .8-4.4 4.1 1.1 6L12 16.5l-5.3 2.9 1.1-6-4.4-4.1 6-.8z"/>'), 'data-drop="favs"')}
     ${it('recent', 'Recently loaded', Object.keys(u.lastUsed).filter(k => S.famBy.has(k)).length, svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'))}
     ${newCount ? it('new', 'Newly installed', newCount, svg('<path d="M12 3v18M3 12h18"/>')) : ''}
@@ -347,29 +392,33 @@ function renderSide() {
     ${S.f.coll === 'kpresets' ? `<h4>Type</h4><div class="seg">${[['all', 'All'], ['preset', 'Presets'], ['rack', 'Racks']].map(([k, l]) => `<button data-kkind="${k}" class="${(S.f.kkind || 'all') === k ? 'on' : ''}">${l}</button>`).join('')}</div>`
       : S.f.coll === 'kontakt' ? '' : `<h4>Type</h4>
     <div class="seg">${[['all', 'All'], ['inst', 'Instr.'], ['fx', 'Effects'], ['midi', 'MIDI']].map(([k, l]) => `<button data-kind="${k}" class="${F.kind === k ? 'on' : ''}">${l}</button>`).join('')}</div>`}</div>
-    <h4><span>Collections</span><button class="link" id="newColl">+ New</button></h4>`;
+    <h4><span>Collections</span><button class="link" id="newColl" title="New collection">+</button></h4>`;
   if (!u.collections.length) h += '<div class="hint">Your own lists, e.g. “Vocal chain” or “Mix bus”. Just drag tiles here.</div>';
   for (const c of u.collections) {
     h += `<button class="item${F.coll === 'c:' + c.id ? ' on' : ''}" data-coll="c:${c.id}" data-drop="c:${c.id}" data-cmenu="${c.id}">${svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>')}<span class="t">${esc(c.name)}</span><span class="n">${c.items.filter(k => S.famBy.has(k)).length}</span></button>`;
   }
-  h += `<h4><span>Racks</span><button class="link" id="newRack">+ New</button></h4>`;
+  h += `<h4><span>Racks</span><button class="link" id="newRack" title="New rack">+</button></h4>`;
   if (!u.racks.length) h += '<div class="hint">A chain of plugins that goes onto the track in this order with one click.</div>';
   for (const r of u.racks) {
     const on = S.drawer?.type === 'rack' && S.drawer.id === r.id;
     h += `<button class="item${on ? ' on' : ''}" data-rack="${r.id}" data-drop="r:${r.id}">${svg('<rect x="3" y="4" width="18" height="5" rx="1.5"/><rect x="3" y="11" width="18" height="5" rx="1.5"/><path d="M7 20h10"/>')}<span class="t">${esc(r.name)}</span><span class="n">${r.items.length}</span></button>`;
   }
 
+  if (typeof userRackSide === 'function') h += userRackSide();
+  if (typeof isUserRackView === 'function' && isUserRackView()) {
+    const sd = $('#side'), sc = sd.scrollTop; sd.innerHTML = h; sd.scrollTop = sc; return;
+  }
   if (typeof isKontaktView === 'function' && isKontaktView()) {
     h += kontaktSide();
     const sd = $('#side'), sc = sd.scrollTop; sd.innerHTML = h; sd.scrollTop = sc; return;
   }
   // categories (counted without the category filter itself)
   const cc = {};
-  for (const f of S.fams) if (passes(f, 'cat')) cc[f.category] = (cc[f.category] || 0) + 1;
-  h += '<h4>Categories</h4>';
+  for (const f of S.fams) if (passes(f, 'cat')) for (const c of [f.category, ...(f.also || [])]) cc[c] = (cc[c] || 0) + 1;
+  h += '<h4><span>Categories</span><button class="link" id="newCat" title="Add your own category">+</button></h4>';
   for (const k of Object.keys(CATS)) {
-    if (!cc[k] && F.cat !== k) continue;
-    h += `<button class="item${F.cat === k ? ' on' : ''}" data-cat="${k}" style="--h:${CATS[k].hue}"><i class="dot"></i><span class="t">${CATS[k].label}</span><span class="n">${cc[k] || 0}</span></button>`;
+    if (!cc[k] && F.cat !== k && !CATS[k].own) continue;
+    h += `<button class="item${F.cat === k ? ' on' : ''}" data-cat="${k}"${CATS[k].own ? ` data-owncat="${k}"` : ''} style="--h:${CATS[k].hue}"><i class="dot"></i><span class="t">${CATS[k].label}</span><span class="n">${cc[k] || 0}</span></button>`;
   }
 
   // makers
@@ -398,6 +447,7 @@ function renderDrawer() {
   d.hidden = false;
   if (S.drawer.type === 'info') return renderInfo(d, S.famBy.get(S.drawer.key));
   if (S.drawer.type === 'rack') return renderRack(d, S.user.racks.find(r => r.id === S.drawer.id));
+  if (S.drawer.type === 'urack' && typeof renderUserRackInfo === 'function') return renderUserRackInfo(d, S.drawer.id);
 }
 
 function archLabel(p) {
@@ -405,6 +455,17 @@ function archLabel(p) {
   if (p.archs.includes('arm64') && p.archs.includes('x86_64')) return '<span class="tag ok">Universal</span>';
   if (p.archs.includes('arm64')) return '<span class="tag ok">Apple Silicon</span>';
   return '<span class="tag warn">Intel only</span>';
+}
+
+/** Short description from plugin-info.js (what it does, what stands out, typical settings, known uses). */
+function infoText(f) {
+  const x = typeof pluginInfo === 'function' && (pluginInfo(f.name) || f.items.map(p => pluginInfo(p.name)).find(Boolean));
+  if (!x) return `<div class="pinfo none">No description for this plugin yet.</div>`;
+  const li = a => a?.length ? `<ul>${a.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : '';
+  return `<div class="pinfo"><p>${esc(x.what)}</p>
+    ${x.special?.length ? `<h5>What stands out</h5>${li(x.special)}` : ''}
+    ${x.settings?.length ? `<h5>Typical settings</h5>${li(x.settings)}` : ''}
+    </div>`;
 }
 
 function renderInfo(d, f) {
@@ -427,7 +488,9 @@ function renderInfo(d, f) {
       <button class="btn" data-hidefam>${u.hidden.includes(f.key) ? 'Show' : 'Hide'}</button></div>
     <dl class="kv">
       <dt>Maker</dt><dd>${esc(f.vendor)}</dd>
-      <dt>Category</dt><dd><select data-setcat>${catOpts}</select></dd>
+      <dt>Category</dt><dd><details class="catpick"><summary>${esc(cat(f.category).label)}${f.also?.length ? ` <small>+${f.also.length}</small>` : ''}</summary>
+        <div class="catlist">${Object.keys(CATS).map(k => `<label class="check"><input type="checkbox" data-catbox="${k}" ${k === f.category || f.also?.includes(k) ? 'checked' : ''}>${esc(CATS[k].label)}${k === f.category ? ' <small>main</small>' : ''}</label>`).join('')}</div></details></dd>
+      ${f.also?.length ? `<dt>Also in</dt><dd>${f.also.map(x => esc(cat(x).label)).join(', ')}</dd>` : ''}
       <dt>Type</dt><dd><select data-setkind>${kindOpts}</select></dd>
       <dt>Size</dt><dd>${fmtBytes(f.bytes)}</dd>
       <dt>Installed</dt><dd>${fmtDate(f.mtime)}</dd>
@@ -435,9 +498,10 @@ function renderInfo(d, f) {
       <dt>Picture</dt><dd>${S.pics.thumbs[f.key] ? 'yes' : S.pics.failed[f.key] ? `failed – ${esc(S.pics.failed[f.key])}` : 'none yet'}
         ${hostable(f) ? `<button class="btn sm" data-capfam style="margin-left:6px">${S.pics.thumbs[f.key] ? 'Retake' : 'Take'}</button>` : ''}</dd>
     </dl>
+    <div class="sect"><h5>About</h5>${infoText(f)}</div>
+    <div class="sect"><h5>Note <small class="saved">saved automatically</small></h5><textarea data-note placeholder="e.g. “great on vocals, preset Air”">${esc(u.notes[f.key] || '')}</textarea></div>
     <div class="sect"><h5>Formats & files</h5>${rows}</div>
     <div class="sect"><h5>Collections</h5><div class="checks">${u.collections.map(col => `<label class="check"><input type="checkbox" data-incoll="${col.id}" ${col.items.includes(f.key) ? 'checked' : ''}> ${esc(col.name)}</label>`).join('') || '<span class="hint" style="padding:0">No collections yet.</span>'}</div></div>
-    <div class="sect"><h5>Note</h5><textarea data-note placeholder="e.g. “great on vocals, preset Air”">${esc(u.notes[f.key] || '')}</textarea></div>
   </div>`;
 }
 
@@ -483,10 +547,16 @@ function healthData() {
   const liveFail = files.filter(p => p.liveFailed).map(p => ({ p, why: 'Live scanned the file but found no plugin in it' }));
   const notInLive = S.lib?.liveDB ? files.filter(p => (p.format === 'VST3' || p.format === 'VST') && p.inLive === false).map(p => ({ p, why: 'Live has not scanned this file yet' })) : [];
   const biggest = files.slice().sort((a, b) => b.bytes - a.bytes).slice(0, 20).map(p => ({ p, why: '' }));
+  const byName = (a, b) => fname(a.p).localeCompare(fname(b.p));
+  const vst2 = files.filter(p => p.format === 'VST').map(p => ({ p, why: '' })).sort((a, b) => fname(a.p).localeCompare(fname(b.p)));
+  const vst3 = files.filter(p => p.format === 'VST3').map(p => ({ p, why: '' })).sort(byName);
+  const vst2only = files.filter(p => p.format === 'VST' && !famFormats.get(p.family)?.has('VST3')).map(p => ({ p, why: 'No VST3 version installed' })).sort(byName);
+  const au = files.filter(p => p.format === 'AU').map(p => ({ p, why: '' })).sort(byName);
+  const allAax = files.filter(p => p.format === 'AAX').map(p => ({ p, why: '' })).sort(byName);
   const sum = a => a.reduce((s, x) => s + x.p.bytes, 0);
   const reclaim = new Map();
   for (const x of [...dup, ...aax, ...broken]) reclaim.set(x.p.path, x.p.bytes);
-  return { files, total, dup, aax, intel, broken, brokenAax, liveFail, notInLive, biggest, sum, fname, reclaim: [...reclaim.values()].reduce((s, b) => s + b, 0) };
+  return { files, total, vst3, vst2, vst2only, au, allAax, dup, aax, intel, broken, brokenAax, liveFail, notInLive, biggest, sum, fname, reclaim: [...reclaim.values()].reduce((s, b) => s + b, 0) };
 }
 
 function renderHealth() {
@@ -498,7 +568,8 @@ function renderHealth() {
   const tile = (id, label, val, sub, cls = '') => `<button class="tile ${cls}" data-jump="${id}"><small>${label}</small><b>${val}</b><span>${sub}</span></button>`;
   const vstNotInLive = H.notInLive.filter(x => x.p.format === 'VST').length;
   const vstTotal = H.files.filter(p => p.format === 'VST').length;
-  const sec = (id, title, items, why, open = false, showWhy = false) => {
+  const sec = (id, title, items, why, open = false, showWhy = false, always = false) => {
+    if (!items.length && always) return `<section class="hsec" id="h-${id}"><header data-toggle>${svg('<path d="m9 6 6 6-6 6"/>')}<h2>${title}</h2><span class="count">0</span></header><p class="why">${why} <b>None on this Mac.</b></p></section>`;
     if (!items.length) return '';
     return `<section class="hsec${open ? ' open' : ''}" id="h-${id}"><header data-toggle>${svg('<path d="m9 6 6 6-6 6"/>')}<h2>${title}</h2><span class="count">${items.length} · ${fmtBytes(H.sum(items))}</span></header>
       <p class="why">${why}</p>
@@ -506,27 +577,116 @@ function renderHealth() {
       ${items.map(({ p, why: w }) => `<tr><td>${esc(H.fname(p))}</td><td><span class="fm">${FMT_LABEL[p.format]}</span></td><td>${esc(p.vendor)}</td>${showWhy ? `<td>${esc(w)}</td>` : ''}<td class="num">${fmtBytes(p.bytes)}</td><td class="p" title="${esc(p.path)}">${esc(p.path)}</td><td><button class="btn sm" data-reveal="${esc(p.path)}">Finder</button></td></tr>`).join('')}
       </tbody></table></section>`;
   };
-  el.innerHTML = `<h1>Health</h1>
-  <p class="lead">What plugins are on your Mac, where space is used twice and what Live cannot load. PlugShelf deletes nothing – “Finder” shows the file, you decide.</p>
+  el.innerHTML = `<div class="hhead"><div class="hrow"><h1>Health</h1>
+    <p class="lead">What plugins are on your Mac, where space is used twice and what Live cannot load. Nothing is deleted unless you confirm it; “Finder” shows the file.</p>
+    <button class="btn sm danger" id="trashFailed" ${H.liveFail.length + H.broken.length ? '' : 'disabled'} title="Plugins Live could not use and broken bundles">Trash ${H.liveFail.length + H.broken.length} unusable</button>
+    <button class="btn sm danger" id="trashIntel" ${H.intel.length ? '' : 'disabled'} title="Plugins without Apple Silicon code">Trash ${H.intel.length} Intel-only</button>
+    <button class="btn sm danger" id="trashAax" ${H.aax.length ? '' : 'disabled'} title="AAX plugins only run in Pro Tools">Trash ${H.aax.length} AAX (Pro Tools only)</button>
+    ${H.dup.length ? `<button class="btn sm danger" id="trashVst2" title="Moves the VST2 copies of plugins that are installed as VST3 too to the Trash">Trash ${H.dup.length} redundant VST2 (VST3 installed)</button>` : ''}</div>
   <div class="tiles">
     ${tile('biggest', 'All plugins', fmtBytes(H.total), `${H.files.length} files`)}
-    ${tile('dup', 'Reclaimable', fmtBytes(H.reclaim), 'Duplicates, AAX without Pro Tools, broken', H.reclaim > 1e9 ? 'warn' : '')}
-    ${tile('dup', 'VST2 next to VST3', H.dup.length, fmtBytes(H.sum(H.dup)), H.dup.length ? 'warn' : 'good')}
-    ${tile('aax', 'AAX without Pro Tools', H.aax.length, fmtBytes(H.sum(H.aax)), H.aax.length ? 'warn' : 'good')}
-    ${tile('intel', 'Intel only', H.intel.length, 'needs Rosetta', H.intel.length ? 'err' : 'good')}
-    ${tile('broken', 'Broken', H.broken.length, 'incomplete bundle', H.broken.length ? 'err' : 'good')}
-    ${tile('livefail', 'Live: failed', H.liveFail.length, 'when Live scanned it', H.liveFail.length ? 'err' : 'good')}
-    ${tile('notinlive', 'Not in Live', H.notInLive.length, 'not scanned yet', H.notInLive.length ? 'warn' : 'good')}
-  </div>
-  ${sec('dup', 'VST2 copies next to a VST3', H.dup, 'The VST3 version of these plugins is installed too. Live usually takes the VST3; you only need the VST2 file for old projects that use it.', true)}
-  ${sec('aax', 'AAX without Pro Tools', H.aax, 'AAX plugins only run in Pro Tools – and Pro Tools is not installed on this Mac. They live in /Library/Application Support/Avid/Audio/Plug-Ins.' + (H.brokenAax.length ? ` ${H.brokenAax.length} of them are incomplete, too.` : ''))}
-  ${sec('intel', 'Intel Macs only', H.intel, 'These plugins contain no Apple Silicon code. Live only loads them when it runs under Rosetta itself. An update from the maker usually fixes this.', true)}
+    ${tile('vst3', 'VST3', H.vst3.length, fmtBytes(H.sum(H.vst3)))}
+    ${tile('vst2', 'VST2', H.vst2.length, fmtBytes(H.sum(H.vst2)))}
+    ${tile('aax', 'AAX', H.allAax.length, fmtBytes(H.sum(H.allAax)), H.aax.length ? 'warn' : '')}
+    ${tile('intel', 'Intel only', H.intel.length, fmtBytes(H.sum(H.intel)), H.intel.length ? 'err' : 'good')}
+    ${tile('dup', 'VST2 that exists as VST3', H.dup.length, fmtBytes(H.sum(H.dup)), H.dup.length ? 'warn' : 'good')}
+    ${tile('livefail', 'Live failed', H.liveFail.length, `${fmtBytes(H.sum(H.liveFail))} (when Live scanned it)`, H.liveFail.length ? 'err' : 'good')}
+    ${tile('livefail', 'Not in Live', H.notInLive.length, `${fmtBytes(H.sum(H.notInLive))} (not scanned yet)`, H.notInLive.length ? 'warn' : 'good')}
+  </div></div>
+  ${sec('vst3', 'VST3 (all)', H.vst3, 'Every VST3 plugin on this Mac – the format Live prefers.', false, false, true)}
+  ${sec('vst2', 'VST2 (all)', H.vst2, 'Every VST2 plugin on this Mac.', false, false, true)}
+  ${sec('dup', 'VST2 that exists as VST3', H.dup, 'The VST3 version of these plugins is installed too. Live usually takes the VST3; you only need the VST2 file for old projects that use it.', true, false, true)}
+  ${sec('au', 'AU (all)', H.au, 'Every Audio Unit plugin on this Mac.', false, false, true)}
+  ${sec('aax', 'AAX (all)', H.allAax, (S.lib?.proTools ? 'AAX plugins run in Pro Tools.' : 'AAX plugins only run in Pro Tools – and Pro Tools is not installed on this Mac.') + ' They live in /Library/Application Support/Avid/Audio/Plug-Ins.', false, false, true)}
+  ${sec('intel', 'Intel only (all)', H.intel, 'These plugins contain no Apple Silicon code and need Rosetta. An update from the maker usually fixes this.', false, false, true)}
+  ${sec('livefail', 'Couldn’t use', H.liveFail, 'The plugin scan found no usable plugin in these files – e.g. an expired licence, missing authorisation or Intel only.', false, false, true)}
   ${sec('broken', 'Broken bundles', H.broken, 'The binary or the Info.plist is missing – often left over from an uninstall or an interrupted update.', true, true)}
-  ${sec('livefail', 'Live could not use these', H.liveFail, 'Live scanned these files and found no usable plugin in them (e.g. an expired licence, missing authorisation, Intel only).', true)}
-  ${sec('notinlive', 'Not in Live yet', H.notInLive, vstTotal && vstNotInLive > vstTotal * 0.6
-    ? `Most VST2 plugins are missing in Live – probably “Use VST2 Plug-in System Folders” is off under Settings → Plug-Ins. For VST3, “Rescan” in Live helps.`
-    : 'Live does not know these files yet. In Live choose Settings → Plug-Ins → “Rescan”.')}
-  ${sec('biggest', 'The biggest plugins', H.biggest, 'Much of the space is often in instruments with built-in samples.')}`;
+  ${sec('biggest', 'Biggest plugins', H.biggest, 'Much of the space is often in instruments with built-in samples.')}`;
+}
+
+/** Moves plugins Live could not use (and broken bundles) to the Trash – after a warning that lists them. */
+async function trashFailed() {
+  const H = healthData();
+  const seen = new Set(), items = [];
+  for (const x of [...H.liveFail, ...H.broken]) if (!seen.has(x.p.path)) { seen.add(x.p.path); items.push(x.p); }
+  if (!items.length) return toast('Nothing unusable found.', 'ok');
+  const size = fmtBytes(items.reduce((a, p) => a + p.bytes, 0));
+  const names = [...new Set(items.map(p => H.fname(p)))];
+  const ok = await confirmDlg(`Move ${items.length} unusable plugins to the Trash?`,
+    `Live scanned these files and could not use them (e.g. expired licence, missing authorisation, outdated or broken). ${items.length} files (${size}): ${names.slice(0, 12).join(', ')}${names.length > 12 ? ` and ${names.length - 12} more` : ''}. A plugin that only needs to be authorised again would be gone as well – check the list first. You can put them back from the Trash. macOS may ask for your admin password.`,
+    `Move ${items.length} to Trash`);
+  if (!ok) return;
+  await runTrash(items, 'unusable plugins');
+}
+
+/** Moves Intel-only plugins (no Apple Silicon code) to the Trash – after a warning. */
+async function trashIntel() {
+  const H = healthData();
+  const items = H.intel.map(x => x.p);
+  if (!items.length) return toast('No Intel-only plugins.', 'ok');
+  const names = [...new Set(items.map(p => H.fname(p)))];
+  const ok = await confirmDlg(`Move ${items.length} Intel-only plugins to the Trash?`,
+    `These plugins contain no Apple Silicon code and only run under Rosetta (${fmtBytes(H.sum(H.intel))}): ${names.slice(0, 12).join(', ')}${names.length > 12 ? ` and ${names.length - 12} more` : ''}. Often the maker has a newer version – check before deleting. You can put them back from the Trash. macOS may ask for your admin password.`,
+    `Move ${items.length} to Trash`);
+  if (!ok) return;
+  await runTrash(items, 'Intel-only plugins');
+}
+
+/** Moves AAX plugins (Pro Tools only) to the Trash – after a warning. */
+async function trashAax() {
+  const H = healthData();
+  const items = H.aax.map(x => x.p);
+  if (!items.length) return toast('There are no AAX plugins to move.', 'ok');
+  const ok = await confirmDlg('Move AAX plugins to the Trash?',
+    `AAX plugins are only used by Pro Tools, and Pro Tools is not installed on this Mac. ${items.length} AAX plugins (${fmtBytes(H.sum(H.aax))}) will be moved to the Trash. Are you sure? You can put them back from the Trash. macOS may ask for your admin password.`,
+    `Move ${items.length} to Trash`);
+  if (!ok) return;
+  await runTrash(items, 'AAX plugins');
+}
+
+/** Moves the VST2 copies of plugins that also exist as VST3 to the Trash – after a clear warning. */
+async function trashVst2() {
+  const H = healthData();
+  const items = H.dup.map(x => x.p);
+  if (!items.length) return;
+  const ok = await confirmDlg('Trash the redundant VST2 versions?',
+    `${items.length} plugins are installed both as VST3 and as VST2 with the same name. The ${items.length} VST2 copies (${fmtBytes(H.sum(H.dup))}) will be moved to the Trash; the VST3 versions stay. Old Live projects that use a VST2 version will not find it any more. You can put them back from the Trash. macOS may ask for your admin password.`,
+    `Move ${items.length} to Trash`);
+  if (!ok) return;
+  await runTrash(items, 'VST2 copies');
+}
+
+async function runTrash(items, what) {
+  let r;
+  try { r = await api.post('/api/health/trash', { paths: items.map(p => p.path) }); } catch (e) { return toast('Could not start: ' + (e.message || e), 'err'); }
+  toast(`Moving ${r.started} ${what} to the Trash – confirm in the Finder dialog if macOS asks.`, 'ok');
+  for (;;) {
+    await new Promise(res => setTimeout(res, 1000));
+    const j = await api.get('/api/health/trash').catch(() => null);
+    if (!j || j.running) continue;
+    toast(j.moved ? `${j.moved} of ${j.total} ${what} are in the Trash. Rescanning…` : `Nothing was moved${j.error ? ': ' + j.error : ''}.`, j.moved ? 'ok' : 'err');
+    break;
+  }
+}
+
+/* ---------- updates from GitHub ---------- */
+async function checkUpdate(force = false) {
+  if (settings().updateCheck === false && !force) return;
+  try { S.update = await api.get('/api/update' + (force ? '?force=1' : '')); } catch { return; }
+  renderBanner();
+  if (force) toast(S.update.available ? `PlugShelf ${S.update.latest} is available.` : S.update.error ? 'GitHub is not reachable right now.' : `PlugShelf ${S.update.current} is the newest version.`, S.update.error ? 'err' : 'ok');
+}
+async function installUpdate() {
+  const ok = await confirmDlg(`Install PlugShelf ${S.update.latest}?`, `PlugShelf downloads the new version from GitHub, checks it, replaces this app and starts again. Your library, favourites, notes and pictures stay. macOS may ask once more for permissions (e.g. Screen Recording) after the update.`, 'Install & restart');
+  if (!ok) return;
+  await api.post('/api/update/install', {});
+  for (;;) {
+    await new Promise(r => setTimeout(r, 800));
+    let st; try { st = await api.get('/api/update/state'); } catch { return; }   // the app is restarting
+    if (st.phase === 'error') return toast(st.msg || 'The update failed', 'err');
+    toast(st.msg, 'ok');
+    if (st.phase === 'restarting') return;
+  }
 }
 
 /* ---------- setup ---------- */
@@ -535,11 +695,11 @@ async function renderSetup() {
   const st = S.script || {};
   const lib = S.lib;
   const order = prefer();
-  el.innerHTML = `<h1>Setup</h1><p class="lead">Set up once, then every plugin lands on the selected track in Ableton Live with one click.</p>
+  el.innerHTML = `<h1>Setup</h1><p class="lead">Set up once, then a click puts any plugin on Live’s selected track.</p>
   <div class="setgrid">
     <div class="box">
       <h2>Ableton Live ${S.daw.ok ? '<span class="tag ok">connected</span>' : '<span class="tag">not connected</span>'}</h2>
-      <p>PlugShelf talks to Live through a small control surface script in your User Library.</p>
+      <p>A small Live script connects PlugShelf to Live.</p>
       <ol class="steps">
         <li>Install the script ${st.installed ? (st.current ? '<span class="tag ok">installed</span>' : '<span class="tag warn">outdated</span>') : '<span class="tag">missing</span>'}</li>
         <li><b>Restart Live</b> (first time only)</li>
@@ -552,16 +712,18 @@ async function renderSetup() {
     </div>
     <div class="box">
       <h2>Format order</h2>
-      <p>When a plugin exists in several formats, a click loads the first available one in this order.</p>
+      <p>Which format loads first.</p>
       <div class="order">${order.map((x, i) => `<div class="o"><span class="num">${i + 1}</span><b>${FMT_LABEL[x]}</b><button class="btn sm" data-up="${i}" ${i ? '' : 'disabled'}>↑</button><button class="btn sm" data-down="${i}" ${i < order.length - 1 ? '' : 'disabled'}>↓</button></div>`).join('')}</div>
       <label class="check"><input type="checkbox" id="showAAX" ${settings().showAAX ? 'checked' : ''}> Show AAX plugins in the library (only Pro Tools loads them)</label>
     </div>
     ${picsBox()}
+    ${updateBox()}
+    ${versionsBox()}
     ${remoteBox()}
     ${builderBox()}
     <div class="box">
       <h2>Scan</h2>
-      <p>${lib ? `Last scanned ${ago(lib.scannedAt)} – ${lib.plugins.length} entries in ${new Set(lib.plugins.map(p => p.path)).size} files. ${lib.liveDB ? 'Read Ableton’s plugin database.' : 'No Ableton plugin database found.'}` : 'Not scanned yet.'}</p>
+      <p>${lib ? `Last scanned ${ago(lib.scannedAt)} – ${new Set(lib.plugins.map(p => p.path)).size} files.` : 'Not scanned yet.'}</p>
       <div class="btns"><button class="btn" id="scanNow">Rescan</button></div>
       <p class="hint" style="padding:10px 0 0">Folders scanned:</p>
       ${(lib?.roots || []).map(r => `<div class="hint" style="padding:1px 0"><span class="code">${esc(r)}</span></div>`).join('')}
@@ -589,7 +751,7 @@ function builderBox() {
   const rows = (b.next || []).map((x, i) => `<li><b>${esc(x.library)}</b> – ${esc(x.instrument)}<br><span class="code" style="font-size:11px">${esc(x.path)}</span></li>`).join('');
   return `<div class="box wide">
     <h2>Kontakt preset builder <span class="tag">${b.remaining} libraries without a preset</span></h2>
-    <p>Makes Kontakt presets in blocks of 15. PlugShelf puts each instrument’s track with Kontakt into Live; you load the listed instrument into each Kontakt with <b>Files → Load…</b> and save the set; PlugShelf then writes the presets to <span class="code">User Library › Kontakt Presets</span>.</p>
+    <p>Makes Kontakt presets in blocks of 15 tracks.</p>
     <ol class="steps">
       <li><button class="btn sm pri" id="kbBlock" ${b.remaining ? '' : 'disabled'}>Put the next ${Math.min(15, b.remaining)} on tracks</button> – in an empty Live set</li>
       <li>In each “KP · …” track’s Kontakt load the instrument below, then save the set as <span class="code">${esc(b.setFile)}</span> (first time Cmd+Shift+S, then Cmd+S)</li>
@@ -603,11 +765,87 @@ function builderBox() {
 async function refreshBuilder() { try { S.builder = await api.get('/api/kontakt/plan'); } catch { S.builder = null; } }
 
 /* ---------- iPad remote ---------- */
+/** Makers with the number of out-of-date plugins; opened, only those plugins: Plugin | Installed | Latest | Update. */
+function versionsList() {
+  const V = S.versions || {}, R = V.results || {}, covered = new Set(V.covered || []);
+  const q = (S.verQ || '').toLowerCase().trim();
+  const by = new Map();
+  for (const f of S.fams) {
+    if (f.stock || !f.items.length) continue;
+    if (q && !(f.name + ' ' + f.vendor).toLowerCase().includes(q)) continue;
+    if (!by.has(f.vendor)) by.set(f.vendor, []);
+    by.get(f.vendor).push(f);
+  }
+  const old = v => by.get(v).filter(f => R[f.key]?.newer);
+  const vendors = [...by.keys()].sort((a, b) => old(b).length - old(a).length || by.get(b).length - by.get(a).length || a.localeCompare(b));
+  if (!vendors.length) return '<p class="hint" style="padding:12px">No plugins match.</p>';
+  const links = v => {
+    const m = S.makers?.[v] || {};
+    return (m.app ? `<button class="btn sm" data-maker-open="${esc(v)}" data-how="app" title="Opens ${esc(m.app)} on this Mac">${esc(m.app)}</button>` : '')
+      + `<button class="btn sm" data-maker-open="${esc(v)}" data-how="web" title="${m.url ? 'Opens the maker’s download page' : 'Searches the web for the maker’s downloads'}">Website</button>`;
+  };
+  const head = '<div class="vrow vhead"><span class="vn">Plugin</span><span class="vv">Installed</span><span class="vl">Latest</span><span class="vk">Update</span></div>';
+  return head + vendors.map(v => {
+    const list = old(v).sort((a, b) => a.name.localeCompare(b.name));
+    const badge = list.length ? `<span class="vbadge" title="${list.length} plugin${list.length === 1 ? '' : 's'} not up to date">${list.length}</span>` : '';
+    let body;
+    if (list.length) {
+      body = list.map(f => {
+        const best = f.items.filter(p => p.format !== 'AAX').sort((a, b) => fmtRank(a.format) - fmtRank(b.format))[0] || f.items[0];
+        const r = R[f.key];
+        return `<div class="vrow newer"><span class="vn">${esc(f.name)}${r.note ? `<small>${esc(r.note)}</small>` : ''}</span><span class="vv">${esc(best.version || '–')}</span><span class="vl">${esc(r.latest)}</span><span class="vk">${links(v)}</span></div>`;
+      }).join('');
+    } else if (covered.has(v)) {
+      body = `<div class="vnote">${V.checkedAt ? `All ${by.get(v).length} plugins are up to date (checked ${ago(V.checkedAt)}).` : 'Not checked yet – press Scan.'}</div>`;
+    } else {
+      body = `<div class="vnote">${esc(v)} publishes no versions PlugShelf can check – the button opens where its updates are.</div>`;
+    }
+    return `<details class="vgrp"${q || list.length ? ' open' : ''}><summary><b>${esc(v)}</b>${badge}<span class="n">${by.get(v).length}</span><span class="vk">${links(v)}</span></summary>${body}</details>`;
+  }).join('');
+}
+
+function versionsBox() {
+  const V = S.versions || {};
+  const outdated = Object.values(V.results || {}).filter(r => r.newer).length;
+  return `<div class="box wide">
+    <h2>Plugin versions ${V.checkedAt ? (outdated ? `<span class="tag warn">${outdated} to update</span>` : '<span class="tag ok">up to date</span>') : ''}</h2>
+    <p>Scan checks for newer versions where makers publish them (${esc((V.covered || []).join(', '))}); every maker links to its updater app or website.</p>
+    <div class="vbar"><button class="btn sm pri" id="verScan" ${V.running ? 'disabled' : ''} title="Check the makers’ websites for newer versions">${svg('<path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3"/><path d="M7 12h10"/>')}${V.running ? 'Scanning…' : 'Scan'}</button>
+      <input class="field" id="verQ" placeholder="Filter by plugin or maker" value="${esc(S.verQ || '')}" autocomplete="off" spellcheck="false">
+      ${V.checkedAt ? `<span class="hint" style="padding:0;white-space:nowrap">Last scan ${ago(V.checkedAt)}</span>` : ''}</div>
+    <div class="vlist" id="verList">${versionsList()}</div>
+  </div>`;
+}
+
+async function versionScan() {
+  try { await api.post('/api/versions/scan', {}); } catch { return toast('PlugShelf is not responding', 'err'); }
+  S.versions = { ...(S.versions || {}), running: true }; renderSetup();
+  for (;;) {
+    await new Promise(r => setTimeout(r, 1000));
+    let v; try { v = await api.get('/api/versions'); } catch { continue; }
+    if (v.running) continue;
+    S.versions = v;
+    if (S.view === 'setup') renderSetup();
+    const n = Object.values(v.results || {}).filter(r => r.newer).length;
+    return toast(n ? `${n} plugin${n === 1 ? '' : 's'} can be updated.` : 'All checked plugins are up to date.', 'ok');
+  }
+}
+
+function updateBox() {
+  const u = S.update || {};
+  return `<div class="box">
+    <h2>Updates ${u.available ? `<span class="tag warn">${esc(u.latest)} available</span>` : u.current ? '<span class="tag ok">up to date</span>' : ''}</h2>
+    <p>PlugShelf ${esc(u.current || '')} – checks GitHub for new versions at start.</p>
+    <label class="check"><input type="checkbox" id="updateCheck" ${settings().updateCheck === false ? '' : 'checked'}> Check for updates when PlugShelf starts</label>
+    <div class="btns" style="margin-top:10px"><button class="btn sm" id="updateNow">Check now</button>${u.available ? '<button class="btn sm pri" data-update-install>Install &amp; restart</button>' : ''}</div>
+  </div>`;
+}
+
 function remoteBox() {
   const r = S.remote || {};
   return `<div class="box">
     <h2>iPad remote ${r.running ? '<span class="tag ok">on</span>' : '<span class="tag">off</span>'}</h2>
-    <p>Browse your plugins and chains on an iPad or iPhone in the same Wi-Fi and load them into Live on this Mac. Off by default; a device needs the code below once.</p>
+    <p>Browse and load plugins from an iPad or iPhone in the same Wi-Fi.</p>
     <label class="check"><input type="checkbox" id="remoteOn" ${r.enabled ? 'checked' : ''}> Allow the iPad remote on this network</label>
     ${r.enabled ? `
       ${r.running ? `<ol class="steps">
@@ -616,7 +854,7 @@ function remoteBox() {
         <li>Share → <b>Add to Home Screen</b> – it then opens like an app</li>
       </ol>` : '<p class="hint">The remote server could not start (port in use?).</p>'}
       <div class="btns"><button class="btn" id="remoteCode">New code</button>${r.devices ? `<button class="btn" id="remoteForget">Unpair ${r.devices} device${r.devices > 1 ? 's' : ''}</button>` : ''}</div>
-      <p class="hint" style="padding:8px 0 0">The first time, macOS may ask whether PlugShelf may accept incoming connections – allow it. Paired devices can load plugins and chains, nothing else.</p>` : ''}
+      <p class="hint" style="padding:8px 0 0">Allow incoming connections if macOS asks.</p>` : ''}
   </div>`;
 }
 async function refreshRemote() { try { S.remote = await api.get('/api/remote'); } catch { S.remote = null; } }
@@ -636,17 +874,17 @@ function picsBox() {
   const running = S.capture?.running;
   return `<div class="box">
     <h2>Plugin pictures</h2>
-    <p>PlugShelf briefly opens each plugin in a small window at the bottom right of the screen and takes a picture of it – about 2 to 6 seconds per plugin. Each runs in its own process: if one crashes, the app is fine.</p>
+    <p>Takes a picture (up to 1000 px) of each plugin.</p>
     <div class="picstats"><div><b>${c.have.length}</b><small>with picture</small></div><div><b>${c.missing.length}</b><small>missing</small></div><div><b>${c.failed.length}</b><small>failed</small></div>${c.impossible.length ? `<div><b>${c.impossible.length}</b><small>AAX/CLAP only</small></div>` : ''}</div>
     <div class="btns">
       <button class="btn pri" id="capMissing" ${c.missing.length && !running ? '' : 'disabled'}>Take missing (${c.missing.length})</button>
       ${c.failed.length ? `<button class="btn" id="capFailed" ${running ? 'disabled' : ''}>Try again (${c.failed.length})</button>` : ''}
       ${S.rone ? `<button class="btn" id="roneImport">Import ${S.rone} pictures from RONE VST MANAGER</button>` : ''}
     </div>
-    ${S.rone ? '<p class="hint" style="padding:8px 0 0">RONE VST MANAGER has already taken pictures of your plugins on this Mac. PlugShelf can import its own captures.</p>' : ''}
+    ${S.rone ? '<p class="hint" style="padding:8px 0 0">RONE VST MANAGER pictures found – they can be imported.</p>' : ''}
     <label class="check" style="margin-top:12px"><input type="checkbox" id="picsOn" ${picsOn() ? 'checked' : ''}> Show pictures on the tiles</label>
     ${c.failed.length ? `<details class="fails"><summary>Failed (${c.failed.length})</summary><ul>${c.failed.map(f => `<li><b>${esc(f.name)}</b><span>${esc(S.pics.failed[f.key])}</span></li>`).join('')}</ul></details>` : ''}
-    <p class="hint" style="padding:10px 0 0">If a plugin only shows its activation window: right-click the tile → “Remove picture” or “Retake picture”.</p>
+    <p class="hint" style="padding:10px 0 0">Activation window instead of the plugin? Right-click the tile → Retake or Remove picture.</p>
   </div>`;
 }
 
@@ -758,6 +996,7 @@ function applyUsage(r) {
 }
 
 async function loadFam(f, format, name) {
+  if (f.stock) return loadStock(f);
   const p = pickItem(f, format, name);
   if (!p) return toast(`${f.name}: no version that runs on this Mac and loads in Live.`, 'err');
   flash(f.key);
@@ -837,6 +1076,44 @@ async function newRack(addKey) {
   saveUser(); renderLib(); renderDrawer();
 }
 
+/** Grid columns right now. */
+const gridCols = () => getComputedStyle($('#grid')).gridTemplateColumns.split(' ').length;
+
+/** Where the enlarged tile goes: its own column and row, moved left only as far as it must to fit. */
+function bigPlace(card) {
+  const cols = gridCols(), span = cols >= 4 ? 3 : Math.min(2, cols);
+  const kids = [...$('#grid').children];
+  const tops = [...new Set(kids.map(k => k.offsetTop))].sort((a, b) => a - b);
+  const row = tops.indexOf(card.offsetTop) + 1;
+  const g = $('#grid').getBoundingClientRect(), w = (g.width + 14) / cols;
+  const col = Math.round((card.getBoundingClientRect().left - g.left) / w) + 1;
+  return { col: Math.max(1, Math.min(col, cols - span + 1)), row: Math.max(1, row), span };
+}
+function bigStyle() {
+  const b = S.bigPos; if (!b) return '';
+  const cols = gridCols(), span = Math.min(b.span, cols), col = Math.max(1, Math.min(b.col, cols - span + 1));
+  return `grid-column:${col} / span ${span};grid-row:${b.row} / span ${span};`;
+}
+
+/** Double-click mode: a click enlarges the tile in place (a second click makes it small again); details open on the right. */
+function focusCard(card, f) {
+  if (S.bigKey === f.key) {                       // second click: back to normal size
+    S.bigKey = null; S.bigPos = null;
+    card.classList.remove('big'); card.style.gridColumn = card.style.gridRow = '';
+    return;
+  }
+  for (const c of $$('#grid .card.big')) { c.classList.toggle('big', false); c.style.gridColumn = c.style.gridRow = ''; }
+  // the details panel narrows the grid first; measure the tile's place after that
+  openInfo(f.key);   // measuring below forces the new layout at once
+  {
+    S.bigPos = bigPlace(card);
+    S.bigKey = f.key;
+    card.classList.add('big');
+    card.style.gridColumn = `${S.bigPos.col} / span ${S.bigPos.span}`;
+    card.style.gridRow = `${S.bigPos.row} / span ${S.bigPos.span}`;
+    card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+}
 function openInfo(key) { S.drawer = { type: 'info', key }; renderDrawer(); }
 
 function reveal(path) { api.post('/api/reveal', { path }); }
@@ -951,7 +1228,7 @@ function show(v) {
   if (v === 'lib') renderLib();
   if (v === 'chains') renderChains();
   if (v === 'health') renderHealth();
-  if (v === 'setup') { renderSetup(); Promise.all([refreshScript(), refreshRone(), refreshRemote(), refreshBuilder()]).then(() => S.view === 'setup' && renderSetup()); }
+  if (v === 'setup') { renderSetup(); Promise.all([refreshScript(), refreshRone(), refreshRemote(), refreshBuilder(), api.get('/api/makers').then(m => { S.makers = m; }).catch(() => {}), api.get('/api/versions').then(v => { S.versions = v; }).catch(() => {})]).then(() => S.view === 'setup' && renderSetup()); }
 }
 
 async function refreshRone() {
@@ -1002,6 +1279,7 @@ async function watchScan() {
       await loadState();
       if (before) {
         const added = S.fams.filter(f => !before.has(f.key)).length;
+        if (S.view === 'setup') renderSetup();
         toast(added ? `Scan done – ${added} new plugins` : 'Scan done – nothing new', 'ok', added ? { label: 'Show', fn: () => { S.f = { ...S.f, coll: 'new', q: '', cat: null, maker: null }; $('#q').value = ''; show('lib'); } } : null);
       }
     } else if (!S.lib) scanTimer = setTimeout(watchScan, 800);
@@ -1050,6 +1328,10 @@ function bind() {
   };
 
   $('#sort').onchange = e => { S.f.sort = e.target.value; renderLib(); };
+  $('#dblLoad').onchange = e => { settings().dblLoad = e.target.checked; saveUser(); if (!e.target.checked) { S.bigKey = null; S.bigPos = null; } renderLib(); };
+  const applySide = () => { const off = !!settings().sideHidden; $('#v-lib').classList.toggle('noside', off); $('#sideToggle').classList.toggle('on', !off); };
+  $('#sideToggle').onclick = () => { settings().sideHidden = !settings().sideHidden; saveUser(); applySide(); };
+  document.addEventListener('keydown', e => { if (e.metaKey && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); $('#sideToggle').click(); } });
   $('#picsToggle').onclick = () => { settings().pics = !picsOn(); saveUser(); $('#picsToggle').classList.toggle('on', picsOn()); renderLib(); renderDrawer(); };
   $('#capStop').onclick = () => api.post('/api/capture/cancel');
   $('#zoom').oninput = e => setZoom(+e.target.value);
@@ -1059,6 +1341,8 @@ function bind() {
     S.f.formats.has(f) ? S.f.formats.delete(f) : S.f.formats.add(f);
     renderLib();
   };
+  // a line under the pinned title bar once the grid scrolls beneath it
+  $('#main').addEventListener('scroll', () => $('.bar1').classList.toggle('stuck', $('#main').scrollTop > 2), { passive: true });
   $('#main').addEventListener('wheel', e => {
     if (!e.ctrlKey) return;
     e.preventDefault();
@@ -1071,6 +1355,8 @@ function bind() {
     const t = e.target.closest('button, [data-coll]');
     if (!t) return;
     if (t.id === 'newColl') return newColl();
+    if (t.id === 'newCat') return newCategory();
+    if (t.id === 'stockShots' || t.closest?.('#stockShots')) { e.preventDefault(); return takeStockPictures(); }
     if (t.id === 'newRack') return newRack();
     if (t.id === 'moreMakers') { S.makersAll = !S.makersAll; return renderSide(); }
     if (t.dataset.kind) { S.f.kind = t.dataset.kind; S.sel = 0; return renderLib(); }
@@ -1078,12 +1364,24 @@ function bind() {
       S.drawer = S.drawer?.type === 'rack' && S.drawer.id === t.dataset.rack ? null : { type: 'rack', id: t.dataset.rack };
       renderSide(); return renderDrawer();
     }
-    if ('coll' in t.dataset) { S.f.coll = t.dataset.coll || null; S.f.kcat = null; S.f.kven = null; S.f.kkind = null; S.sel = 0; if (/^k(ontakt|presets)$/.test(S.f.coll || '')) loadKontakt(); $('#main').scrollTop = 0; return renderLib(); }
+    if ('coll' in t.dataset && !t.dataset.coll) { S.f.cat = null; S.f.maker = null; S.f.formats.clear(); S.f.kind = 'all'; S.f.q = ''; $('#q').value = ''; }
+    if ('coll' in t.dataset) { S.f.coll = t.dataset.coll || null; S.f.kcat = null; S.f.kven = null; S.f.kkind = null; S.sel = 0; if (/^k(ontakt|presets)$/.test(S.f.coll || '')) loadKontakt(); if (/^ur:/.test(S.f.coll || '')) loadUserRacks(); $('#main').scrollTop = 0; return renderLib(); }
     if (t.dataset.cat) { S.f.cat = S.f.cat === t.dataset.cat ? null : t.dataset.cat; S.sel = 0; $('#main').scrollTop = 0; return renderLib(); }
     if (t.dataset.maker) { S.f.maker = S.f.maker === t.dataset.maker ? null : t.dataset.maker; S.sel = 0; $('#main').scrollTop = 0; return renderLib(); }
   });
   side.addEventListener('input', e => { if (e.target.id === 'makerQ') { S.makerQ = e.target.value; renderSide(); } });
+  side.addEventListener('change', e => { if (e.target.id === 'showStock') { settings().showStock = e.target.checked; saveUser(); S.sel = 0; renderLib(); } });
   side.addEventListener('contextmenu', e => {
+    const oc = e.target.closest('[data-owncat]');
+    if (oc) {
+      e.preventDefault();
+      const cc = (S.user.customCats || []).find(x => x.id === oc.dataset.owncat);
+      if (!cc) return;
+      return menu(e.clientX, e.clientY, [
+        { label: 'Rename…', fn: async () => { const n = await ask('Rename category', '', cc.label); if (n) { cc.label = n; saveUser(); rebuild(); renderLib(); renderDrawer(); } } },
+        { label: 'Delete', fn: async () => { if (await confirmDlg(`Delete the category “${cc.label}”?`, 'The plugins stay installed and keep their other categories.')) removeCategory(cc.id); } },
+      ]);
+    }
     const c = e.target.closest('[data-cmenu]'), r = e.target.closest('[data-rack]');
     if (c) {
       e.preventDefault();
@@ -1135,7 +1433,19 @@ function bind() {
       if (act === 'menu') { const r = e.target.getBoundingClientRect(); return cardMenu(f, r.left, r.bottom + 4); }
       const i = +card.dataset.i;
       if (i >= 0) { S.sel = i; $$('#grid .card.sel').forEach(c => c.classList.remove('sel')); card.classList.add('sel'); }
+      if (settings().dblLoad && root.id === 'grid') {
+        if (e.detail > 1) return;                          // part of a double-click
+        clearTimeout(S.clickT);
+        S.clickT = setTimeout(() => focusCard(card, f), 220);
+        return;
+      }
       loadFam(f);
+    });
+    root.addEventListener('dblclick', e => {
+      if (!settings().dblLoad || root.id !== 'grid') return;
+      const card = e.target.closest('.card'); if (!card || e.target.closest('[data-act]')) return;
+      clearTimeout(S.clickT);
+      const f = S.famBy.get(card.dataset.k); if (f) loadFam(f);
     });
     root.addEventListener('contextmenu', e => {
       const card = e.target.closest('.card'); if (!card) return;
@@ -1157,6 +1467,10 @@ function bind() {
   $('#banner').addEventListener('click', e => {
     if (e.target.closest('[data-go]')) show('setup');
     if (e.target.closest('[data-banner-off]')) { settings().bannerOff = true; saveUser(); renderBanner(); }
+    if (e.target.closest('[data-update-install]')) return installUpdate();
+    if (e.target.closest('[data-update-skip]')) { settings().skipVersion = S.update?.latest; saveUser(); renderBanner(); }
+    // the app opens other sites in the default browser
+    if (e.target.closest('[data-update-notes]') && S.update?.page) location.href = S.update.page;
   });
 
   bindDrawer();
@@ -1216,6 +1530,18 @@ function bindDrawer() {
   d.addEventListener('change', e => {
     const t = e.target;
     const f = S.drawer?.key && S.famBy.get(S.drawer.key);
+    if (t.dataset.catbox && f) {
+      // the first ticked category stays the main one; the others are "also in"
+      const now = [f.category, ...(f.also || [])].filter(k => k !== t.dataset.catbox);
+      const next = t.checked ? [...now, t.dataset.catbox] : now;
+      if (!next.length) { t.checked = true; return toast('A plugin needs at least one category.', 'err'); }
+      const o = (S.user.overrides[f.key] ||= {});
+      o.category = next[0]; o.also = next.slice(1);
+      saveUser(); rebuild(); renderLib();
+      const open = $('#drawer .catpick')?.open; renderDrawer(); if (open) $('#drawer .catpick').open = true;
+      return;
+    }
+    if (t.dataset.note != null) { rebuild(); renderLib(); }
     if (t.dataset.setcat != null && f) { (S.user.overrides[f.key] ||= {}).category = t.value; saveUser(); rebuild(); renderLib(); renderDrawer(); }
     if (t.dataset.setkind != null && f) { (S.user.overrides[f.key] ||= {}).kind = t.value; saveUser(); rebuild(); renderLib(); renderDrawer(); }
     if (t.dataset.incoll && f) {
@@ -1276,10 +1602,21 @@ function bindPages() {
   $('#health').addEventListener('click', e => {
     const r = e.target.closest('[data-reveal]'); if (r) return reveal(r.dataset.reveal);
     const h = e.target.closest('[data-toggle]'); if (h) return h.parentElement.classList.toggle('open');
+    if (e.target.closest('#trashVst2')) return trashVst2();
+    if (e.target.closest('#trashAax')) return trashAax();
+    if (e.target.closest('#trashFailed')) return trashFailed();
+    if (e.target.closest('#trashIntel')) return trashIntel();
     const j = e.target.closest('[data-jump]');
     if (j) { const s = $('#h-' + j.dataset.jump); if (s) { s.classList.add('open'); s.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }
   });
+  $('#setup').addEventListener('change', e => { if (e.target.id === 'updateCheck') { settings().updateCheck = e.target.checked; saveUser(); } });
+  $('#setup').addEventListener('input', e => { if (e.target.id === 'verQ') { S.verQ = e.target.value; $('#verList').innerHTML = versionsList(); } });
   $('#setup').addEventListener('click', async e => {
+    const mo = e.target.closest('[data-maker-open]');
+    if (mo) { e.preventDefault(); e.stopPropagation(); const r = await api.post('/api/makers/open', { vendor: mo.dataset.makerOpen, how: mo.dataset.how }).catch(() => null); return toast(r?.msg || 'Could not open it', r?.ok ? 'ok' : 'err'); }
+    if (e.target.closest('#verScan')) return versionScan();
+    if (e.target.closest('#updateNow')) { await checkUpdate(true); return renderSetup(); }
+    if (e.target.closest('[data-update-install]')) return installUpdate();
     const t = e.target.closest('button'); if (!t) return;
     if (t.id === 'install') {
       const r = await api.post('/api/ableton/install');
@@ -1373,8 +1710,11 @@ function onKey(e) {
   if (settings().onTop && window.__plugshelfApp) { $('#pin').classList.add('on'); api.post('/api/window', { onTop: true }); }
   watchScan();
   $('#picsToggle').classList.toggle('on', picsOn());
+  $('#v-lib').classList.toggle('noside', !!settings().sideHidden); $('#sideToggle').classList.toggle('on', !settings().sideHidden);
+  $('#dblLoad').checked = !!settings().dblLoad;
   watchCapture();
   await refreshScript();
+  checkUpdate();
   renderBanner();
   pollDaw();
   setInterval(pollDaw, 4000);

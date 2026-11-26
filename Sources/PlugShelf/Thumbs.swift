@@ -1,3 +1,4 @@
+import ImageIO
 import Foundation
 
 /// Pictures of plugin editors: where they live, how they are taken (one helper process per
@@ -25,12 +26,48 @@ final class Thumbs {
             shots = o
         }
         // Forget pictures whose file has gone.
-        for (f, s) in shots where s["ok"] as? Bool == true && !FileManager.default.fileExists(atPath: Thumbs.file(f).path) {
+        for (f, s) in shots where s["ok"] as? Bool == true && !FileManager.default.fileExists(atPath: Thumbs.file(f).path)
+            && !FileManager.default.fileExists(atPath: Thumbs.legacyFile(f).path) {
             shots[f] = nil
         }
     }
 
-    static func file(_ family: String) -> URL { dir.appendingPathComponent(Classify.stableId(family) + ".png") }
+    /// Pictures are JPEGs of at most 1000 px (the largest view, the enlarged tile, shows about 980 px on Retina).
+    static func file(_ family: String) -> URL { dir.appendingPathComponent(Classify.stableId(family) + ".jpg") }
+    static func legacyFile(_ family: String) -> URL { dir.appendingPathComponent(Classify.stableId(family) + ".png") }
+    static let maxPixels = 1000, quality = 0.88
+
+    /// Writes any image (PNG capture, RONE picture …) as the compact JPEG.
+    @discardableResult
+    static func compact(_ source: CGImageSource, to dst: URL) -> Bool {
+        guard let img = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixels] as CFDictionary) else { return false }
+        let data = NSMutableData()
+        guard let d = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else { return false }
+        CGImageDestinationAddImage(d, img, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary)
+        guard CGImageDestinationFinalize(d) else { return false }
+        return (try? (data as Data).write(to: dst, options: .atomic)) != nil
+    }
+    @discardableResult
+    static func compact(_ src: URL, to dst: URL) -> Bool {
+        guard let s = CGImageSourceCreateWithURL(src as CFURL, nil) else { return false }
+        return compact(s, to: dst)
+    }
+
+    /// One-time: turns the old full-size PNG pictures into compact JPEGs; the PNGs go to the Trash.
+    static func migrate() {
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        for f in files where f.pathExtension == "png" && f.lastPathComponent.range(of: #"^[0-9a-f]{16}\.png$"#, options: .regularExpression) != nil {
+            autoreleasepool {
+                let jpg = f.deletingPathExtension().appendingPathExtension("jpg")
+                if FileManager.default.fileExists(atPath: jpg.path) || compact(f, to: jpg) {
+                    try? FileManager.default.trashItem(at: f, resultingItemURL: nil)
+                }
+            }
+        }
+    }
 
     var progress: Progress { lock.lock(); defer { lock.unlock() }; return _progress }
 
@@ -41,12 +78,18 @@ final class Thumbs {
         for (f, s) in shots {
             if s["ok"] as? Bool == true {
                 let v = (s["v"] as? Double).map { String(Int($0)) } ?? "0"
-                thumbs[f] = "thumbs/\(Classify.stableId(f)).png?v=\(v)"
+                thumbs[f] = "thumbs/\(Classify.stableId(f)).jpg?v=\(v)"
             } else {
                 failed[f] = s["msg"] as? String ?? "no picture"
             }
         }
         return ["thumbs": thumbs, "failed": failed]
+    }
+
+    /// Keeps a picture taken elsewhere (e.g. of a Live device).
+    func store(_ family: String, png: Data, source: String) {
+        guard let src = CGImageSourceCreateWithData(png as CFData, nil), Thumbs.compact(src, to: Thumbs.file(family)) else { return }
+        record(family, ["ok": true, "v": Date().timeIntervalSince1970 * 1000, "src": source, "at": Date().timeIntervalSince1970 * 1000])
     }
 
     private func record(_ family: String, _ entry: [String: Any]?) {
@@ -59,6 +102,7 @@ final class Thumbs {
 
     func delete(_ family: String) {
         try? FileManager.default.removeItem(at: Thumbs.file(family))
+        try? FileManager.default.removeItem(at: Thumbs.legacyFile(family))
         record(family, nil)
     }
 
@@ -159,9 +203,8 @@ final class Thumbs {
         bufLock.unlock()
 
         if text.contains("PLUGSHELF-OK"), FileManager.default.fileExists(atPath: tmp.path) {
-            let dst = Thumbs.file(job.family)
-            try? FileManager.default.removeItem(at: dst)
-            do { try FileManager.default.moveItem(at: tmp, to: dst) } catch { return (false, "Cannot save the picture") }
+            guard Thumbs.compact(tmp, to: Thumbs.file(job.family)) else { return (false, "Cannot save the picture") }
+            try? FileManager.default.removeItem(at: Thumbs.legacyFile(job.family))
             return (true, "")
         }
         if let line = text.split(separator: "\n").last(where: { $0.hasPrefix("PLUGSHELF-ERR") }) {
@@ -231,12 +274,43 @@ final class Thumbs {
         for (family, pic) in roneCandidates(lib) {
             lock.lock(); let has = shots[family]?["ok"] as? Bool == true; lock.unlock()
             if has { continue }
-            let dst = Thumbs.file(family)
-            try? FileManager.default.removeItem(at: dst)
-            guard (try? FileManager.default.copyItem(at: pic, to: dst)) != nil else { continue }
+            guard Thumbs.compact(pic, to: Thumbs.file(family)) else { continue }
             record(family, ["ok": true, "v": Date().timeIntervalSince1970 * 1000, "src": "rone"])
             n += 1
         }
         return n
+    }
+
+    /// A smaller JPEG of a capture (longest side `maxPixels`), cached in thumbs/small/ until the capture changes.
+    static func small(_ src: URL, maxPixels: Int, tag: String) -> Data? {
+        let dir = Thumbs.dir.appendingPathComponent("small", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let out = dir.appendingPathComponent(src.deletingPathExtension().lastPathComponent + "-" + tag + ".jpg")
+        let fm = FileManager.default
+        if let a = (try? fm.attributesOfItem(atPath: out.path))?[.modificationDate] as? Date,
+           let b = (try? fm.attributesOfItem(atPath: src.path))?[.modificationDate] as? Date, a >= b,
+           let d = try? Data(contentsOf: out) { return d }
+        guard let source = CGImageSourceCreateWithURL(src as CFURL, nil),
+              let img = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixels] as CFDictionary) else { return nil }
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, img, [kCGImageDestinationLossyCompressionQuality: tag == "blur" ? 0.6 : 0.84] as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        try? (data as Data).write(to: out, options: .atomic)
+        return data as Data
+    }
+
+    /// Makes the tile and blur versions of every capture that does not have them yet.
+    static func warmSmall() {
+        let files = (try? FileManager.default.contentsOfDirectory(at: Thumbs.dir, includingPropertiesForKeys: nil)) ?? []
+        for f in files where f.pathExtension == "jpg" || f.pathExtension == "png" {
+            autoreleasepool {
+                _ = small(f, maxPixels: 520, tag: "tile")
+                _ = small(f, maxPixels: 24, tag: "blur")
+            }
+        }
     }
 }

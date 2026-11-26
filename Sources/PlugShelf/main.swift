@@ -20,6 +20,8 @@ let server = HTTPServer { api.handle($0) }
 do {
     try server.start(preferredPort: 47900)
     api.remote.start(api: api)
+    // small grid pictures are made once in the background (low priority), so the first scroll does not wait for them
+    DispatchQueue.global(qos: .background).async { Thumbs.migrate(); Thumbs.warmSmall() }
 } catch {
     FileHandle.standardError.write(Data("PlugShelf: \(error.localizedDescription)\n".utf8))
     exit(1)

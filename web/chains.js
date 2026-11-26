@@ -192,7 +192,7 @@ function slotFace(f) {
   if (!f) return '<div class="cs-face none">No matching plugin installed</div>';
   const pic = picsOn() && S.pics.thumbs[f.key];
   const c = cat(f.category);
-  if (pic) return `<div class="cs-face pic"><img class="bg" src="${esc(pic)}" alt=""><img class="fg" src="${esc(pic)}" alt=""></div>`;
+  if (pic) return `<div class="cs-face pic"><img class="bg" src="${esc(pic)}${pic.includes("?") ? "&" : "?"}s=blur" alt="" decoding="async"><img class="fg" src="${esc(pic)}${pic.includes("?") ? "&" : "?"}s=tile" alt="" decoding="async"></div>`;
   return `<div class="cs-face plate" style="--h:${c.hue}"><span class="fv">${esc(f.vendor)}</span><span class="fn">${esc(f.name)}</span>${svg(c.i, 'wm')}</div>`;
 }
 

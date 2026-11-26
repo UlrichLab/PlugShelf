@@ -43,9 +43,11 @@
     <main class="main" id="main">
       <div class="banner" id="banner" hidden></div>
       <div class="bar1">
+        <button class="icon sm" id="sideToggle" title="Show / hide the sidebar (Cmd+Shift+S)"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
         <h2 id="title">All plugins</h2><span class="count" id="count"></span>
         <div class="grow"></div>
         <div class="chips" id="fmts"></div>
+        <label class="dbl" title="On: a click enlarges the tile and shows details, a double-click loads. Off: a click loads."><input type="checkbox" id="dblLoad"> Double-click to load</label>
         <select id="sort" title="Sort"></select>
         <button class="icon sm" id="picsToggle" title="Plugin pictures on the tiles"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-8 8"/></svg></button>
         <label class="zoom" title="Tile size (Ctrl + mouse wheel)"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/></svg><input type="range" id="zoom" min="140" max="320" step="2"></label>
@@ -65,8 +67,15 @@
   <div class="modal" id="modal" hidden></div>
   <div class="toasts" id="toasts"></div>
 </div>
+<script src="categories.js"></script>
+<script src="plugin-info.js"></script>
+<script src="plugin-info-a.js"></script>
+<script src="plugin-info-b.js"></script>
+<script src="plugin-info-c.js"></script>
 <script src="app.js"></script>
+<script src="stock.js"></script>
 <script src="kontakt.js"></script>
+<script src="userracks.js"></script>
 <script src="chain-data.js"></script>
 <script src="chain-famous.js"></script>
 <script src="chain-ua.js"></script>

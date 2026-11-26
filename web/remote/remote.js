@@ -27,7 +27,7 @@ const CATS = {
   EQ: ['EQ', 190], Dynamics: ['Dynamics', 152], 'Channel Strip': ['Channel Strip', 170], Reverb: ['Reverb', 222], Delay: ['Delay', 205],
   Modulation: ['Modulation', 320], Distortion: ['Saturation', 14], Filter: ['Filter', 48], Pitch: ['Pitch', 280], Vocal: ['Vocals', 340],
   Spatial: ['Stereo & space', 236], Mastering: ['Mastering', 40], Analyzer: ['Analysis', 125], Restoration: ['Restoration', 100],
-  Utility: ['Utilities', 210], MIDI: ['MIDI', 215], Other: ['Other', 220],
+  Creative: ['Creative & multi-FX', 290], Utility: ['Utilities', 210], MIDI: ['MIDI', 215], Other: ['Other', 220],
 };
 const cat = c => CATS[c] || CATS.Other;
 
@@ -52,7 +52,7 @@ function buildFams() {
   R.fams = []; R.famBy = new Map();
   for (const [key, items] of by) {
     const b = items[0], o = ov[key] || {};
-    const f = { key, items, name: o.name || b.display || b.name, vendor: b.vendor || 'Unknown', kind: o.kind || b.kind, category: o.category || b.category,
+    const f = { key, items, name: o.name || b.display || b.name, vendor: b.vendor || 'Unknown', kind: o.kind || b.kind, category: o.category || (typeof fixCategory === 'function' ? fixCategory(o.name || b.display || b.name, b.category)[0] : b.category), also: o.also || (o.category || typeof fixCategory !== 'function' ? [] : fixCategory(o.name || b.display || b.name, b.category).slice(1)),
       formats: [...new Set(items.map(p => p.format))], mtime: Math.max(...items.map(p => p.mtime || 0)) };
     f.loadable = items.some(usable);
     f.hay = [f.name, f.vendor, cat(f.category)[0], ...new Set(items.map(p => p.name))].join(' ').toLowerCase();
@@ -80,7 +80,7 @@ function passes(f, skip) {
   if (F.coll === 'uad' && !isUAD(f)) return false;
   if (F.coll?.startsWith('c:')) { const c = u.collections?.find(x => x.id === F.coll.slice(2)); if (!c?.items.includes(f.key)) return false; }
   if (F.kind !== 'all' && f.kind !== F.kind) return false;
-  if (skip !== 'cat' && F.cat && f.category !== F.cat) return false;
+  if (skip !== 'cat' && F.cat && f.category !== F.cat && !f.also?.includes(F.cat)) return false;
   if (F.q && !F.q.toLowerCase().split(/\s+/).every(w => f.hay.includes(w))) return false;
   return true;
 }
@@ -90,7 +90,7 @@ function tileFace(f, eager = false) {
   if (pic && !pic.startsWith('/')) pic = '/' + pic;   // picture URLs are relative to the Mac page's root
   const fav = R.user.favs?.includes(f.key) ? '<span class="fav">★</span>' : '';
   const lazy = eager ? '' : ' loading="lazy"';
-  if (pic) return `<img class="bg" src="${esc(pic)}" alt=""${lazy}><img class="fg" src="${esc(pic)}" alt=""${lazy}>
+  if (pic) return `<img class="bg" src="${esc(pic)}&s=blur" alt=""${lazy} decoding="async"><img class="fg" src="${esc(pic)}&s=tile" alt=""${lazy} decoding="async">
     <div class="cap"><b>${esc(f.name)}</b><small>${esc(f.vendor)}</small></div>${fav}`;
   return `<div class="plate"><b>${esc(f.name)}</b></div><div class="cap"><small>${esc(f.vendor)}</small></div>${fav}`;
 }
@@ -181,7 +181,7 @@ function renderSide() {
       `<button class="item${R.f.kcat === g ? ' on' : ''}" data-kcat="${esc(g)}" style="--h:${K_HUE[g]}"><i class="dot"></i><span>${esc(g)}</span><span class="n">${kc[g] || 0}</span></button>`).join('') + kVendors();
   }
   const cc = {};
-  for (const f of R.fams) if (passes(f, 'cat')) cc[f.category] = (cc[f.category] || 0) + 1;
+  for (const f of R.fams) if (passes(f, 'cat')) for (const c of [f.category, ...(f.also || [])]) cc[c] = (cc[c] || 0) + 1;
   h += '<h4>Categories</h4>' + Object.keys(CATS).filter(k => cc[k] || F.cat === k).map(k =>
     `<button class="item${F.cat === k ? ' on' : ''}" data-cat="${k}" style="--h:${CATS[k][1]}"><i class="dot"></i><span>${CATS[k][0]}</span><span class="n">${cc[k] || 0}</span></button>`).join('');
   return h;
@@ -433,6 +433,7 @@ async function start() {
   try {
     const st = await api.get('/api/remote/state');
     R.lib = st.library; R.user = st.user || {}; R.pics = st.pics || { thumbs: {} };
+    for (const c of R.user.customCats || []) CATS[c.id] = [c.label, c.hue];
     buildFams();
     try { uaRegister(await api.get('/api/uapresets')); } catch { /* no UA presets */ }
     try { R.kontakt = await api.get('/api/kontakt'); } catch { /* no Kontakt */ }
