@@ -579,10 +579,10 @@ function renderHealth() {
   };
   el.innerHTML = `<div class="hhead"><div class="hrow"><h1>Health</h1>
     <p class="lead">What plugins are on your Mac, where space is used twice and what Live cannot load. Nothing is deleted unless you confirm it; “Finder” shows the file.</p>
-    <button class="btn sm danger" id="trashFailed" ${H.liveFail.length + H.broken.length ? '' : 'disabled'} title="Plugins Live could not use and broken bundles">Trash ${H.liveFail.length + H.broken.length} unusable</button>
-    <button class="btn sm danger" id="trashIntel" ${H.intel.length ? '' : 'disabled'} title="Plugins without Apple Silicon code">Trash ${H.intel.length} Intel-only</button>
-    <button class="btn sm danger" id="trashAax" ${H.aax.length ? '' : 'disabled'} title="AAX plugins only run in Pro Tools">Trash ${H.aax.length} AAX (Pro Tools only)</button>
-    ${H.dup.length ? `<button class="btn sm danger" id="trashVst2" title="Moves the VST2 copies of plugins that are installed as VST3 too to the Trash">Trash ${H.dup.length} redundant VST2 (VST3 installed)</button>` : ''}</div>
+    <button class="btn sm danger" id="trashFailed" ${H.liveFail.length + H.broken.length ? '' : 'disabled'} title="Plugins Live could not use and broken bundles">Delete ${H.liveFail.length + H.broken.length} unusable</button>
+    <button class="btn sm danger" id="trashIntel" ${H.intel.length ? '' : 'disabled'} title="Plugins without Apple Silicon code">Delete ${H.intel.length} Intel-only</button>
+    <button class="btn sm danger" id="trashAax" ${H.aax.length ? '' : 'disabled'} title="AAX plugins only run in Pro Tools">Delete ${H.aax.length} AAX (Pro Tools only)</button>
+    ${H.dup.length ? `<button class="btn sm danger" id="trashVst2" title="Moves the VST2 copies of plugins that are installed as VST3 too to the Trash">Delete ${H.dup.length} redundant VST2 (VST3 installed)</button>` : ''}</div>
   <div class="tiles">
     ${tile('biggest', 'All plugins', fmtBytes(H.total), `${H.files.length} files`)}
     ${tile('vst3', 'VST3', H.vst3.length, fmtBytes(H.sum(H.vst3)))}
