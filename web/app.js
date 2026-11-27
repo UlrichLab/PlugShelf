@@ -37,6 +37,9 @@ const I = {
   spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
   strip: '<path d="M6 3v18M12 3v18M18 3v18"/><rect x="4" y="13" width="4" height="3" rx="1"/><rect x="10" y="7" width="4" height="3" rx="1"/><rect x="16" y="11" width="4" height="3" rx="1"/>',
   dot: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/>',
+  tape: '<circle cx="7" cy="11" r="4"/><circle cx="17" cy="11" r="4"/><circle cx="7" cy="11" r="1"/><circle cx="17" cy="11" r="1"/><path d="M7 15h10M4 20h16"/>',
+  amp: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><circle cx="7" cy="6.5" r=".8"/><circle cx="10.5" cy="6.5" r=".8"/><circle cx="12" cy="14.5" r="3.5"/>',
+  surround: '<circle cx="12" cy="12" r="2.5"/><path d="M5 5l2 2M19 5l-2 2M5 19l2-2M19 19l-2-2M12 3v2.5"/><circle cx="12" cy="12" r="8" stroke-dasharray="2 3"/>',
 };
 const CATS = {
   Synth: { label: 'Synths', hue: 268, i: I.wave },
@@ -51,10 +54,13 @@ const CATS = {
   Delay: { label: 'Delay', hue: 205, i: I.delay },
   Modulation: { label: 'Modulation', hue: 320, i: I.mod },
   Distortion: { label: 'Saturation', hue: 14, i: I.dist },
+  Tape: { label: 'Tape & lo-fi', hue: 26, i: I.tape },
+  Amp: { label: 'Amps & pedals', hue: 0, i: I.amp },
   Filter: { label: 'Filter', hue: 48, i: I.filter },
   Pitch: { label: 'Pitch', hue: 280, i: I.pitch },
   Vocal: { label: 'Vocals', hue: 340, i: I.mic },
   Spatial: { label: 'Stereo & space', hue: 236, i: I.spatial },
+  Surround: { label: 'Surround', hue: 252, i: I.surround },
   Mastering: { label: 'Mastering', hue: 40, i: I.master },
   Analyzer: { label: 'Analysis', hue: 125, i: I.meter },
   Restoration: { label: 'Restoration', hue: 100, i: I.spark },
@@ -465,13 +471,12 @@ function infoText(f) {
   if (!x && !o) return `<div class="pinfo none">No description for this plugin yet.</div>`;
   const own = x ? `<p>${esc(x.what)}</p>
     ${x.special?.length ? `<h5>What stands out</h5>${li(x.special)}` : ''}
-    ${x.settings?.length ? `<h5>Typical settings</h5>${li(x.settings)}` : ''}` : '';
+    ${x.settings?.length ? `<h5>Typical settings</h5>${li(x.settings)}` : ''}
+    ${x.tips?.length ? `<h5>Tips from tutorials</h5>${li(x.tips)}` : ''}` : '';
   let orig = '';
   if (o) {
-    const sibs = S.fams.filter(g => g !== f && famOriginal(g) === o).sort((a, b) => a.name.localeCompare(b.name));
     orig = `<div class="porig"><h5>The original: ${esc(o.title)}</h5><p>${esc(o.text)}</p>${li(o.facts)}
-      ${o.uses?.length ? `<h5>Typical use of the original</h5>${li(o.uses)}` : ''}
-      ${sibs.length ? `<h5>Also modelled on it in your library (${sibs.length})</h5><div class="psibs">${sibs.map(g => `<button class="osib" data-openfam="${esc(g.key)}" title="${esc(g.vendor)}">${esc(g.name)}<small>${esc(g.vendor)}</small></button>`).join('')}</div>` : ''}</div>`;
+      ${o.uses?.length ? `<h5>Typical use of the original</h5>${li(o.uses)}` : ''}</div>`;
   }
   return `<div class="pinfo">${own}${orig}</div>`;
 }
@@ -1556,7 +1561,6 @@ function bindDrawer() {
     if ('capfam' in t.dataset && f) return capture([f.key]);
     if (t.dataset.load && f) { const p = f.items.find(x => x.id === t.dataset.load); return loadFam(f, p.format, p.name); }
     if (t.dataset.reveal) return reveal(t.dataset.reveal);
-    if (t.dataset.openfam) return openInfo(t.dataset.openfam);
     const rack = S.drawer?.type === 'rack' && S.user.racks.find(r => r.id === S.drawer.id);
     if (!rack) return;
     if ('loadrack' in t.dataset) return loadRack(rack);

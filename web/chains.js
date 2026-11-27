@@ -34,9 +34,12 @@ function chainFam(f) {
 function roleIndex() {
   const sig = S.user.hidden.join(',') + '|' + settings().showAAX;
   if (roleCache && roleCache.sig === sig) return roleCache.map;
-  const usable = S.fams.filter(f => f.loadable && showable(f) && !S.user.hidden.includes(f.key) && f.kind !== 'inst');
+  const fx = S.fams.filter(f => f.loadable && showable(f) && !S.user.hidden.includes(f.key) && f.kind !== 'inst');
   const map = {};
-  for (const r of Object.keys(CHAIN_ROLES)) map[r] = usable.filter(f => chainRoleFits(r, chainFam(f))).map(f => f.key);
+  for (const r of Object.keys(CHAIN_ROLES)) map[r] = fx.filter(f => chainRoleFits(r, chainFam(f))).map(f => f.key);
+  // instruments: an Instrument Rack needs the VST3
+  map.inst = S.fams.filter(f => f.loadable && showable(f) && !S.user.hidden.includes(f.key) && f.kind === 'inst'
+    && f.items.some(p => p.format === 'VST3' && usable(p))).map(f => f.key);
   roleCache = { sig, map };
   return map;
 }
@@ -47,11 +50,25 @@ function slotWeight(key, slot) {
   let w = 1;
   if (slot.prefer && new RegExp(slot.prefer, 'i').test([f.name, ...f.items.map(p => p.name)].join(' '))) w *= 4;
   if (S.user.favs.includes(key)) w *= 2.5;
+  if (slot.favor && new RegExp(slot.favor, 'i').test(f.vendor + ' ' + f.name)) w *= 4;
+  if ((slot.role === 'eq' || slot.role === 'dyneq') && isTopEq(f)) w *= 3;
   if (S.user.usage[key]) w *= 1.3;
   return w;
 }
 
 const famText = f => [f.vendor, f.name, ...f.items.map(p => p.name)].join(' ');
+
+/** EQs the user prefers: FabFilter Pro-Q 4 and the Weiss EQs – first in every EQ list. */
+const TOP_EQ = /pro-?q ?4|weiss eq/i;
+const isTopEq = f => !!f && TOP_EQ.test(f.name);
+/** An older FabFilter version (Pro-Q 3) gives way to the newest one installed (Pro-Q 4). */
+function newestOnly(keys) {
+  const base = n => n.toLowerCase().replace(/^fabfilter\s+/, '').replace(/\s*\d+$/, '');
+  const ver = n => +(n.match(/(\d+)$/) || [0, 0])[1];
+  const best = new Map();
+  for (const k of keys) { const f = S.famBy.get(k); if (!f || f.vendor !== 'FabFilter') continue; const b = base(f.name); if (!best.has(b) || ver(f.name) > ver(S.famBy.get(best.get(b)).name)) best.set(b, k); }
+  return keys.filter(k => { const f = S.famBy.get(k); return !f || f.vendor !== 'FabFilter' || best.get(base(f.name)) === k; });
+}
 
 /** Plugins in the library that emulate the slot's named hardware (any role), e.g. every 1176 model. */
 function deviceMatches(slot) {
@@ -70,7 +87,7 @@ function isSubstitute(slot, f) {
 /** A random plugin for a slot, weighted towards plugins made for the job; avoids `exclude`.
     A slot that names hardware takes an emulation of it whenever there is one. */
 function pickForSlot(slot, exclude) {
-  const dev = deviceMatches(slot).filter(k => !exclude.has(k));
+  const dev = newestOnly(deviceMatches(slot).filter(k => !exclude.has(k)));
   if (dev.length) {
     // The plugin named exactly like the slot (e.g. "Weiss DS1-MK3") is the one meant; other emulations get a chance.
     const norm = x => String(x).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -82,7 +99,7 @@ function pickForSlot(slot, exclude) {
     return dev[dev.length - 1];
   }
   const all = (roleIndex()[slot.role] || []).filter(k => S.famBy.has(k));
-  let pool = all.filter(k => !exclude.has(k));
+  let pool = newestOnly(all.filter(k => !exclude.has(k)));
   if (!pool.length) pool = all.filter(k => k !== slot.family);
   if (!pool.length) return slot.family || null;
   // A slot that names a maker (the UAD chains) picks from that maker's plugins whenever there are any.
@@ -125,6 +142,36 @@ function persistChain() {
   saveUser();
 }
 
+/* ---------- maker presets (loaded into the plugin inside the rack) ---------- */
+
+const presetCache = new Map();
+function presetsFor(key) {
+  if (!presetCache.has(key)) presetCache.set(key, api.get('/api/presets?family=' + encodeURIComponent(key)).then(r => r.presets || []).catch(() => []));
+  return presetCache.get(key);
+}
+/** Does the slot take a maker preset? Instruments and slots of preset chains (`pre`) do. */
+const wantsPreset = s => s.role === 'inst' || !!s.pre || !!s.pcat;
+/** A random preset of the slot's kind (`pcat`: category / type / name), else any. */
+async function pickPreset(s) {
+  if (!s.family || !wantsPreset(s)) { s.preset = null; return; }
+  const list = await presetsFor(s.family);
+  if (!list.length) { s.preset = null; return; }
+  const re = s.pcat ? new RegExp(s.pcat, 'i') : null;
+  const fit = re ? list.filter(p => re.test(p.category + ' ' + p.type + ' ' + p.name)) : list;
+  const pool = fit.length ? fit : (s.role === 'inst' ? [] : list);
+  const p = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+  s.preset = p ? { path: p.path, name: p.name, category: p.category, type: p.type, info: p.info } : null;
+}
+async function fillPresets(indices) {
+  const ch = C.chain;
+  await Promise.all(indices.map(i => ch.slots[i] && pickPreset(ch.slots[i])));
+  // a slot with a Live Drum Rack as fallback (e.g. Shimmer Shake Strike missing) uses that rack instead
+  for (const i of indices) { const s = ch.slots[i]; if (s && s.core && s.role === 'inst' && !s.preset) s.family = null; }
+  if (C.chain !== ch) return;
+  persistChain();
+  renderChains();
+}
+
 /* ---------- the two randomizers ---------- */
 
 /** Same modules, other plugins: every unlocked slot changes to another plugin of its kind. */
@@ -140,6 +187,7 @@ function rollPlugins() {
   });
   persistChain();
   renderChains(true);
+  fillPresets(slots.map((s, i) => (!s.locked && wantsPreset(s) ? i : -1)).filter(i => i >= 0));
 }
 
 /** A new layout from the chosen category (or any), filled at random. */
@@ -149,11 +197,12 @@ function rollChain() {
   if (pool.length > 1 && C.chain) pool = pool.filter(t => t.id !== C.chain.template);
   if (!pool.length) return toast('No template for this category.', 'err');
   const t = pool[Math.floor(Math.random() * pool.length)];
-  const possible = t.slots.filter(s => (idx[s.role] || []).length || deviceMatches({ device: s.device ? s.device.source : '' }).length);
+  const possible = t.slots.filter(s => s.core || (idx[s.role] || []).length || deviceMatches({ device: s.device ? s.device.source : '' }).length);
   let chosen = possible.filter(s => Math.random() < (s.opt ?? 1));
   if (chosen.length < Math.min(2, possible.length)) chosen = possible;
   remember();
   const slots = chosen.map(s => ({ role: s.role, label: s.label, tip: s.tip || '', prefer: s.prefer ? s.prefer.source : '', only: s.only ? s.only.source : '',
+    pcat: s.pcat ? s.pcat.source : '', pre: !!s.pre, favor: s.favor ? s.favor.source : '', core: s.core || '',
     device: s.device ? s.device.source : '', set: s.set || null, macros: s.macros || null, family: null, locked: false }));
   const used = new Set();
   for (const s of slots) { s.family = pickForSlot(s, used); if (s.family) used.add(s.family); }
@@ -161,6 +210,7 @@ function rollChain() {
   C.chain = { template: t.id, rubric: t.rubric, also: t.also || [], name: t.name, desc: t.desc, src: t.src || '', slots, missing: [...new Set(missing)] };
   persistChain();
   renderChains(true);
+  fillPresets(slots.map((s, i) => (wantsPreset(s) ? i : -1)).filter(i => i >= 0));
 }
 
 function rollSlot(i) {
@@ -168,9 +218,11 @@ function rollSlot(i) {
   remember();
   const others = new Set(C.chain.slots.map(x => x.family).filter(Boolean));
   s.family = pickForSlot(s, others);
+  s.preset = null;
   persistChain();
   renderChains();
   flashSlot(i);
+  if (wantsPreset(s)) fillPresets([i]);
 }
 
 function flashSlot(i) {
@@ -257,9 +309,10 @@ function renderChains(animate = false) {
     <div class="cslot${s.locked ? ' locked' : ''}" data-i="${i}" style="--h:${f ? cat(f.category).hue : 220}">
       <div class="cs-top"><span class="num">${i + 1}</span><span class="role" title="${esc(CHAIN_ROLES[s.role]?.name || '')}">${esc(s.label)}</span>
         <button class="cs-lock" data-lock title="${s.locked ? 'Unlock' : 'Lock – stays put when you roll'}">${LOCK(s.locked)}</button></div>
-      <button class="cs-main" data-pick title="Pick another plugin">${slotFace(f)}
-        <div class="cs-name"><b>${esc(f ? f.name : '—')}</b><small>${esc(f ? f.vendor : CHAIN_ROLES[s.role]?.name || '')}</small>
+      <button class="cs-main" data-pick title="Pick another plugin">${!f && s.core ? `<div class="cs-face none">Live Drum Rack – ${esc(s.core)}</div>` : slotFace(f)}
+        <div class="cs-name"><b>${esc(f ? f.name : s.core || '—')}</b><small>${esc(f ? f.vendor : s.core ? 'Live Drum Rack (Core Library)' : CHAIN_ROLES[s.role]?.name || '')}</small>
           ${isSubstitute(s, f) ? `<em class="subst" title="You have no plugin of the original – this is a comparable one">Stand-in for ${esc(s.label)}</em>` : ''}</div></button>
+      ${f && wantsPreset(s) ? `<button class="cs-preset" data-preset title="Pick a preset">${s.preset ? `<b>Preset</b> ${esc(s.preset.name)}<small>${esc(s.preset.type || s.preset.category || '')}</small>` : '<b>Preset</b> <small>none for this plugin – default sound</small>'}</button>` : ''}
       <div class="cs-tip">${esc(s.tip)}</div>
       ${s.set && Object.keys(s.set).length ? `<div class="cs-set" title="Starting values in the Ableton rack (via the macros)">${Object.entries(s.set).map(([k, v]) => `<span>${esc(setLabel(k, v))}</span>`).join('')}</div>` : ''}
       <div class="cs-acts">
@@ -305,8 +358,119 @@ function renderChains(animate = false) {
     <div class="arrow">${svg('<path d="M4 12h15M14 7l5 5-5 5"/>')}</div><div class="io">OUT</div>
     <button class="addslot" id="addSlot" title="Add a module">+ Module</button>
   </div>
+  ${chainGuide(ch)}
   <p class="hint chainhint">Click a plugin to pick another one. The lock keeps a module when you roll. “Load in Live” builds an Ableton rack (VST3 versions, key knobs on named macros at the starting values) and puts it on the selected track.</p>`;
   chainPics();
+}
+
+/* ---------- guide below the chain ---------- */
+
+/** What to adjust when using the chain for its purpose – by category, then per module. */
+const CHAIN_ADJUST = {
+  vocals: ['Set the input so the first compressor shows about 3–6 dB of gain reduction on the loudest words.',
+    'Tune the de-esser to the singer: sibilance sits somewhere between 5 and 9 kHz.',
+    'High-pass to taste (80–120 Hz) – lower for deep voices, higher for thin ones.',
+    'Set reverb and delay amounts against the full track, not soloed.'],
+  drums: ['Attack decides the punch: slower lets the stick hit through, faster flattens it.',
+    'Tune EQ boosts to the kit – kick body 50–80 Hz, snare body 150–250 Hz, crack 2–5 kHz.',
+    'When a module runs in parallel, set the blend with Mix rather than the threshold.'],
+  bass: ['Match low boosts and the high-pass to the song’s key and the kick so they do not fight.',
+    'Drive the saturation until the bass is heard on small speakers, then back off a little.',
+    'Keep the low end below about 100 Hz in mono.'],
+  perc: ['Shape attack and release to the groove – the release should breathe in time with the tempo.',
+    'Thin out low end below 150–200 Hz so percussion does not cloud the kick.'],
+  instr: ['Cut what the instrument does not need (low end on guitars and keys) before boosting.',
+    'Set compression for an even level: 2–4 dB is usually enough.',
+    'Effects in time with the song: sync delay and modulation rates to the tempo.'],
+  lead: ['Bright leads: tame harshness at 2–5 kHz before adding width or reverb.',
+    'Sync delays to the tempo (1/8 dotted, 1/4) and keep the mix low enough that the line stays clear.'],
+  mod: ['Set rates in time with the song and keep Mix low enough that the sound stays in place.'],
+  returns: ['Put the chain on a return track: every wet/dry Mix at 100 %, the amount comes from the send.',
+    'High-pass the return (around 150–300 Hz) so the effect does not muddy the low end.'],
+  mixbus: ['Aim for 1–3 dB of gain reduction – the bus should glue, not squash.',
+    'Compare at equal loudness: match the output to the bypassed level before judging.'],
+  master: ['Limiter ceiling at −1 dBTP for streaming; loudness to taste (about −14 to −9 LUFS).',
+    'Compare at equal loudness and against a reference track.',
+    'Small moves: EQ changes of 0.5–1.5 dB are usually enough on a master.'],
+  shakers: ['Pick the shaker inside Shimmer Shake Strike (or the pad in the Drum Rack) that fits the groove, then play 16ths with velocity changes.',
+    'High-pass shakers hard (300–600 Hz) – they live in the top end.',
+    'Keep the level low: a shaker should be felt more than heard.'],
+  synth: ['Pick the preset first (click “Preset” on the instrument), then adjust the effects to it.',
+    'Play in the register the sound is meant for – basses below C2, pads and leads higher.',
+    'Bright, resonant patches: let the resonance control and EQ take out harshness before reverb and delay.',
+    'Sync delays and LFO effects to the tempo; set reverb and delay amounts against the full track.'],
+  sounddesign: ['Most of these chains shine on a return or bounced to audio, so you can reverse, stretch and re-pitch the result.',
+    'Automate the key knobs (filter, pitch, Mix) over time – sound design is movement.',
+    'Bounce, reverse and process again for new material.'],
+  experimental: ['Every module loads a random maker preset – roll the presets (Roll plugins, or “Preset” on a module) until something sparks.',
+    'Presets are set for their original use: lower Mix and output levels to fit your track.',
+    'Found something good? Save it as an Ableton rack before you roll again.'],
+  uad: ['Set the input of the first UAD module so its meter moves around 0 VU – UAD emulations sound best at their nominal level.',
+    'Compression: 3–6 dB on the loudest parts as a start.'],
+};
+
+/** Starting settings per module type, used when a module's own tip says little ("Colour."). [mix, master/bus] */
+const ROLE_HOW = {
+  preamp: ['Drive the input until the colour is heard, then match the output level.', 'Drive gently – only enough for subtle colour.'],
+  eq: ['Cut before you boost; 2–4 dB moves, sweep to find the frequency.', 'Broad moves of 0.5–1.5 dB; low and high shelves first.'],
+  dyneq: ['Threshold so it only reacts on the harsh or boomy moments; 2–4 dB.', 'Only 1–2 dB on problem frequencies.'],
+  comp: ['Threshold for 3–6 dB of gain reduction; attack 10–30 ms, release in time with the song.', 'Ratio 1.5–2:1, slow attack, auto release, 1–2 dB.'],
+  multiband: ['Only touch the bands that jump out; 2–3 dB per band.', '1–2 dB per band, mostly on lows and highs.'],
+  limiter: ['Catch only the peaks: 1–3 dB.', 'Ceiling −1 dBTP; raise the input until the loudness fits, at most 2–3 dB of gain reduction.'],
+  clipper: ['Clip only the loudest transients, 1–2 dB.', 'Only 0.5–1.5 dB before the limiter.'],
+  gate: ['Threshold just above the bleed; release so the tail stays natural.', ''],
+  transient: ['More attack for punch, less sustain for tightness – small moves.', ''],
+  deess: ['Find the “s” frequency (5–9 kHz) and reduce it by 3–6 dB.', 'Only 1–2 dB on the harshest moments.'],
+  sat: ['Drive until it adds warmth, then back off; match the level.', 'Very little drive – it should glue, not distort.'],
+  dist: ['Drive to taste and blend with Mix for control.', ''],
+  amp: ['Gain for the amount of crunch; blend with the clean signal if needed.', ''],
+  tape: ['Push the input for saturation; choose the speed/tape type for the low end.', 'Low input – subtle glue and rounding of the highs.'],
+  crush: ['Blend with Mix so the original stays audible.', ''],
+  exciter: ['Add until it is just audible, then back off a little.', 'Very little – it adds up quickly on a master.'],
+  reverb: ['Decay to the tempo; pre-delay 20–60 ms; high-pass the reverb.', ''],
+  delay: ['Sync to the tempo; feedback 15–30 %; filter the repeats.', ''],
+  chorus: ['Slow rate, low depth; Mix to taste.', ''],
+  mod: ['Rate in time with the song; Mix to taste.', ''],
+  filter: ['Set the cutoff by ear; automate it for movement.', ''],
+  tune: ['Set the key and scale; retune speed fast for the hard effect, slower for natural.', ''],
+  pitch: ['Small shifts (5–15 cents) for width; Mix to taste.', ''],
+  width: ['Widen the highs, keep the lows mono; check in mono.', 'Little width, and keep everything below about 150 Hz mono.'],
+  sidechain: ['Trigger from the kick; depth to taste, release in time with the tempo.', ''],
+  meter: ['No settings – watch loudness, peaks and balance.', 'Watch integrated LUFS and true peak.'],
+};
+
+function chainGuide(ch) {
+  const li = a => a.map(t => `<li>${t}</li>`).join('');
+  // the hardware the chain was built around: named devices, or the original a chosen plugin models
+  const hw = [];
+  ch.slots.forEach((s, i) => {
+    const f = s.family && S.famBy.get(s.family);
+    const o = f && typeof famOriginal === 'function' ? famOriginal(f) : null;
+    if (s.device) {
+      const sub = isSubstitute(s, f);
+      hw.push(`<b>${i + 1}. ${esc(s.label)}</b>${f ? ` – in your chain: ${esc(f.name)}${sub ? ' (a comparable plugin)' : ''}` : ''}`);
+    } else if (o) {
+      hw.push(`<b>${i + 1}. ${esc(o.title)}</b> – modelled by ${esc(f.name)}`);
+    }
+  });
+  // step by step: the plugin chosen for each module, and below it what to set
+  const steps = ch.slots.map((s, i) => {
+    const f = s.family && S.famBy.get(s.family);
+    const vals = s.set && Object.keys(s.set).length ? 'Starting values: ' + Object.entries(s.set).map(([k, v]) => setLabel(k, v)).join(', ') + '.' : '';
+    const tip = (s.tip || '').trim();
+    const r = ROLE_HOW[s.role];
+    const big = /^(master|mixbus)$/.test(ch.rubric);
+    const extra = r && tip.length < 40 ? (big && r[1]) || r[0] : '';
+    const how = [tip, extra, vals].filter(Boolean).map(t => `<span>${esc(t)}</span>`).join('') || `<span class="none">Set to taste.</span>`;
+    const pre = s.preset ? `<span>Preset: <b>${esc(s.preset.name)}</b>${s.preset.type ? ' (' + esc(s.preset.type) + ')' : ''}${s.preset.info ? ' – ' + esc(s.preset.info) : ''}</span>` : '';
+    return `<li><b>${i + 1}. ${esc(f ? f.name : s.core ? s.core + ' (Live Drum Rack)' : s.label)}</b><div class="how">${pre}${how}</div></li>`;
+  });
+  const general = CHAIN_ADJUST[ch.rubric] || (String(ch.rubric).startsWith('ua-') ? CHAIN_ADJUST.uad : []);
+  return `<div class="chainguide">
+    <div><h5>Adjust for your track</h5><ol class="steps">${steps.join('')}</ol>
+      ${general.length ? `<h5 class="gen">Also check</h5><ul>${li(general.map(esc))}</ul>` : ''}</div>
+    ${hw.length ? `<div><h5>Original hardware</h5><ul>${li(hw)}</ul></div>` : ''}
+  </div>`;
 }
 
 /* ---------- Ableton racks ---------- */
@@ -314,11 +478,14 @@ function renderChains(animate = false) {
 /** Builds an Audio Effect Rack (.adg) from the chain; with `load`, puts it on Live's selected track. */
 async function buildRack(name, load) {
   const ch = C.chain;
-  const slots = ch.slots.filter(s => s.family).map(s => ({ family: s.family, role: s.role, label: s.label, set: s.set || {}, macros: s.macros || [] }));
+  // the instrument goes first; an Instrument Rack lands on a MIDI track
+  const ordered = [...ch.slots.filter(s => s.family && s.role === 'inst').slice(0, 1), ...ch.slots.filter(s => s.family && s.role !== 'inst')];
+  const slots = ordered.map(s => ({ family: s.family, role: s.role, label: s.label, set: s.set || {}, macros: s.macros || [], ...(s.preset ? { preset: s.preset.path } : {}) }));
+  const core = ch.slots.find(s => s.role === 'inst' && !s.family && s.core)?.core;
   if (!slots.length) return;
   let r;
   try {
-    r = await api.post('/api/rack/build', { name, annotation: [ch.desc, ch.src && 'Source: ' + ch.src].filter(Boolean).join(' – '), slots, returns: ch.rubric === 'returns', load });
+    r = await api.post('/api/rack/build', { name, annotation: [ch.desc, ch.src && 'Source: ' + ch.src].filter(Boolean).join(' – '), slots, returns: ch.rubric === 'returns', load, ...(core ? { core } : {}) });
   } catch { r = { ok: false, msg: 'PlugShelf is not responding' }; }
   if (!r.ok) return toast(r.msg || 'Cannot build the rack', 'err');
   C.building = true;
@@ -338,10 +505,12 @@ async function buildRack(name, load) {
     const skipped = res.skipped?.length ? ` Not in the rack: ${res.skipped.join(', ')}.` : '';
     if (!res.ok) return toast((res.msg || 'Cannot build the rack') + skipped, 'err');
     if (load) {
-      if (res.loaded) toast(`Rack “${res.name}” with ${res.macros.length} macros → ${String(res.msg || '').split('\u2192 ').pop()}.${skipped}`, 'ok');
+      if (res.loaded) toast(`${res.core && !res.coreMsg ? `Live Drum Rack “${res.core}” and r` : 'R'}ack “${res.name}” with ${res.macros.length} macros → ${String(res.msg || '').split('\u2192 ').pop()}.${res.coreMsg ? ' ' + res.coreMsg + '.' : ''}${skipped}`, 'ok');
       else toast(`Rack saved, but Live did not load it: ${res.msg || 'no answer'}.${skipped}`, 'err', res.offline ? { label: 'Setup', fn: () => show('setup') } : null);
     } else {
-      toast(`Saved rack “${res.name}” – ${res.devices} plugins, ${res.macros.length} macros. In Live: Browser › User Library › Presets › Audio Effects › Audio Effect Rack › PlugShelf.${skipped}`, 'ok');
+      toast(res.instrument
+        ? `Saved instrument rack “${res.name}” – ${res.devices} plugins, ${res.macros.length} macros. In Live: Browser › User Library › Presets › Instruments › Instrument Rack › PlugShelf Instruments.${skipped}`
+        : `Saved rack “${res.name}” – ${res.devices} plugins, ${res.macros.length} macros. In Live: Browser › User Library › Presets › Audio Effects › Audio Effect Rack › PlugShelf.${skipped}`, 'ok');
     }
   };
   setTimeout(poll, 400);
@@ -352,16 +521,43 @@ async function buildRack(name, load) {
 function openPicker(i) {
   const s = C.chain.slots[i];
   const idx = roleIndex();
-  const fits = (idx[s.role] || []).map(k => S.famBy.get(k)).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  const byName = (a, b) => a.name.localeCompare(b.name, 'de');
+  const fits = (idx[s.role] || []).map(k => S.famBy.get(k)).filter(Boolean).sort(byName);
+  // The same kind of device first: emulations of the named hardware, plugins of the slot's style
+  // (another preamp for a preamp, another opto compressor for an opto) and models of the same original.
+  // a saved chain keeps the style it was made with; take the template's current one when it still exists
+  const ts = CHAIN_TEMPLATES.find(t => t.id === C.chain.template)?.slots.find(x => x.role === s.role && x.label === s.label);
+  const prefer = ts ? (ts.prefer ? ts.prefer.source : '') : s.prefer;
+  const same = new Set(deviceMatches(ts ? { device: ts.device ? ts.device.source : '' } : s));
+  if (prefer) { const re = new RegExp(prefer, 'i'); for (const f of fits) if (re.test([f.name, ...f.items.map(p => p.name)].join(' '))) same.add(f.key); }
+  const cur = s.family && S.famBy.get(s.family);
+  const orig = cur && typeof famOriginal === 'function' ? famOriginal(cur) : null;
+  if (orig) for (const f of fits) if (famOriginal(f) === orig) same.add(f.key);
+  if (cur && fits.includes(cur)) same.add(cur.key);
+  // EQ slots: Pro-Q 4 and the Weiss EQs always at the top
+  const topF = s.role === 'eq' || s.role === 'dyneq' ? S.fams.filter(f => isTopEq(f) && f.loadable && showable(f) && f.items.some(p => p.format === 'VST3' && usable(p))).sort(byName) : [];
+  const top = new Set(topF.map(f => f.key));
+  const sameF = [...same].filter(k => !top.has(k)).map(k => S.famBy.get(k)).filter(Boolean).sort(byName);
+  const rest = fits.filter(f => !same.has(f.key) && !top.has(f.key));
+  const roleName = CHAIN_ROLES[s.role]?.name || 'Plugins';
   const m = $('#modal');
+  const row = f => `<button class="pk${f.key === s.family ? ' on' : ''}" data-k="${esc(f.key)}" style="--h:${cat(f.category).hue}"><i class="dot"></i><span class="t">${esc(f.name)}</span><span class="v">${esc(f.vendor)}</span></button>`;
   const listHTML = (q, all) => {
-    const src = all ? S.fams.filter(f => f.loadable && showable(f) && f.kind !== 'inst' && f.items.some(p => p.format === 'VST3' && usable(p))) : fits;
     const ql = q.toLowerCase();
-    return src.filter(f => !ql || f.hay.includes(ql)).slice(0, 300).map(f =>
-      `<button class="pk${f.key === s.family ? ' on' : ''}" data-k="${esc(f.key)}" style="--h:${cat(f.category).hue}"><i class="dot"></i><span class="t">${esc(f.name)}</span><span class="v">${esc(f.vendor)}</span></button>`).join('')
+    const hit = f => !ql || f.hay.includes(ql);
+    if (all) {
+      const src = S.fams.filter(f => f.loadable && showable(f) && (s.role === 'inst' ? f.kind === 'inst' : f.kind !== 'inst') && f.items.some(p => p.format === 'VST3' && usable(p)));
+      return src.filter(hit).slice(0, 300).map(row).join('') || '<div class="hint">Nothing found.</div>';
+    }
+    const t = topF.filter(hit), a = sameF.filter(hit), b = rest.filter(hit);
+    const head = t.length ? `<div class="pkh">Your top EQs · ${t.length}</div>${t.map(row).join('')}` : '';
+    if (!sameF.length) return head + (b.length && head ? `<div class="pkh">More: ${esc(roleName)} · ${b.length}</div>` : '') + b.map(row).join('') || '<div class="hint">Nothing found.</div>';
+    return head + (a.length ? `<div class="pkh">Same kind · ${a.length}</div>${a.map(row).join('')}` : '')
+      + (b.length ? `<div class="pkh">More: ${esc(roleName)} · ${b.length}</div>${b.map(row).join('')}` : '')
       || '<div class="hint">Nothing found.</div>';
   };
-  m.innerHTML = `<div class="dlg picker"><h3>${esc(s.label)}</h3><p>${fits.length} matching plugins in your library.</p>
+  const lead = sameF.length ? `${sameF.length} of the same kind in your library, ${rest.length} more of type “${esc(roleName)}”.` : `${fits.length} matching plugins in your library.`;
+  m.innerHTML = `<div class="dlg picker"><h3>${esc(s.label)}</h3><p>${lead}</p>
     <input class="field" id="pkQ" placeholder="Search" autocomplete="off">
     <label class="check" style="margin:8px 0"><input type="checkbox" id="pkAll"> Show all effects</label>
     <div class="pklist" id="pkList">${listHTML('', false)}</div>
@@ -379,10 +575,50 @@ function openPicker(i) {
     const b = e.target.closest('.pk'); if (!b) return;
     remember();
     s.family = b.dataset.k;
+    s.preset = null;
     persistChain();
     close();
     renderChains();
     flashSlot(i);
+    if (wantsPreset(s)) fillPresets([i]);
+  };
+}
+
+async function openPresetPicker(i) {
+  const s = C.chain.slots[i];
+  if (!s.family) return;
+  const list = await presetsFor(s.family);
+  const m = $('#modal');
+  const f = S.famBy.get(s.family);
+  const row = p => `<button class="pk${s.preset?.path === p.path ? ' on' : ''}" data-p="${esc(p.path)}"><span class="t">${esc(p.name)}</span><span class="v">${esc(p.type || p.category)}</span></button>`;
+  const listHTML = q => {
+    const ql = q.toLowerCase();
+    const hit = list.filter(p => !ql || (p.name + ' ' + p.category + ' ' + p.type).toLowerCase().includes(ql)).slice(0, 400);
+    let last = null, out = '';
+    for (const p of hit) { if (p.category !== last) { out += `<div class="pkh">${esc(p.category || 'Presets')}</div>`; last = p.category; } out += row(p); }
+    return out || '<div class="hint">No presets found.</div>';
+  };
+  m.innerHTML = `<div class="dlg picker"><h3>${esc(f ? f.name : '')} – preset</h3><p>${list.length ? `${list.length} presets of this plugin that PlugShelf can load into the rack.` : 'PlugShelf cannot load presets of this plugin into a rack – it starts with its default sound.'}</p>
+    <input class="field" id="ppQ" placeholder="Search presets" autocomplete="off">
+    <div class="pklist" id="ppList">${listHTML('')}</div>
+    <div class="btns"><button class="btn" data-none>Default sound</button><button class="btn" data-rnd>${DICE} Random</button><button class="btn" data-no>Close</button></div></div>`;
+  m.hidden = false;
+  const q = $('#ppQ'), box = $('#ppList');
+  q.oninput = () => { box.innerHTML = listHTML(q.value); };
+  q.focus();
+  const close = () => { m.hidden = true; m.innerHTML = ''; };
+  const done = () => { persistChain(); close(); renderChains(); flashSlot(i); };
+  q.onkeydown = e => { if (e.key === 'Escape') close(); e.stopPropagation(); };
+  $('[data-no]', m).onclick = close;
+  $('[data-none]', m).onclick = () => { remember(); s.preset = null; done(); };
+  $('[data-rnd]', m).onclick = async () => { remember(); await pickPreset(s); done(); };
+  m.onclick = e => { if (e.target === m) close(); };
+  box.onclick = e => {
+    const b = e.target.closest('.pk'); if (!b) return;
+    const p = list.find(x => x.path === b.dataset.p); if (!p) return;
+    remember();
+    s.preset = { path: p.path, name: p.name, category: p.category, type: p.type, info: p.info };
+    done();
   };
 }
 
@@ -420,7 +656,10 @@ function bindChains() {
       return loadRack({ name: C.chain.name, items: C.chain.slots.filter(s => s.family).map(s => ({ family: s.family, format: null })) });
     }
     if (t.id === 'saveChain') {
-      const name = await ask('Save as Ableton rack', 'Goes to your User Library under Presets › Audio Effects › Audio Effect Rack › PlugShelf – with the key knobs on named, coloured macros.', C.chain.name);
+      const inst = C.chain.slots.some(s => s.role === 'inst' && s.family);
+      const name = await ask('Save as Ableton rack', inst
+        ? 'An Instrument Rack in your User Library under Presets › Instruments › Instrument Rack › PlugShelf Instruments – instrument, effects and presets, with the key knobs on macros.'
+        : 'Goes to your User Library under Presets › Audio Effects › Audio Effect Rack › PlugShelf – with the key knobs on named, coloured macros.', C.chain.name);
       if (name) buildRack(name, false);
       return;
     }
@@ -430,6 +669,7 @@ function bindChains() {
     if ('lock' in t.dataset) { s.locked = !s.locked; persistChain(); return renderChains(); }
     if ('roll' in t.dataset) return rollSlot(i);
     if ('pick' in t.dataset) return openPicker(i);
+    if ('preset' in t.dataset) return openPresetPicker(i);
     if ('del' in t.dataset) { remember(); C.chain.slots.splice(i, 1); persistChain(); return renderChains(); }
     if ('left' in t.dataset || 'right' in t.dataset) {
       const j = 'left' in t.dataset ? i - 1 : i + 1;

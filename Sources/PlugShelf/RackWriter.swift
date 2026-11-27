@@ -23,6 +23,8 @@ enum RackWriter {
         var processorState: String // hex
         var controllerState: String
         var params: [Mapping]
+        var instrument = false     // the first device of an Instrument Rack
+        var name = ""              // shown as the device's title in Live (e.g. "EchoBoy · 30 ips Tape Echo")
     }
 
     struct Macro {
@@ -74,12 +76,12 @@ enum RackWriter {
             + "<ParameterSettings>\(params)</ParameterSettings>"
             + "<IsOn Value=\"true\" /><PowerMacroControlIndex Value=\"-1\" /><PowerMacroMappingRange><Min Value=\"64\" /><Max Value=\"127\" /></PowerMacroMappingRange>"
             + "<IsFolded Value=\"false\" /><StoredAllParameters Value=\"true\" /><DeviceLomId Value=\"0\" /><DeviceViewLomId Value=\"0\" />"
-            + "<IsOnLomId Value=\"0\" /><ParametersListWrapperLomId Value=\"0\" /><Uid>\(uid)</Uid><DeviceType Value=\"2\" />"
+            + "<IsOnLomId Value=\"0\" /><ParametersListWrapperLomId Value=\"0\" /><Uid>\(uid)</Uid><DeviceType Value=\"\(d.instrument ? 1 : 2)\" />"
             + "<ProcessorState>\(blob(d.processorState))</ProcessorState><ControllerState>\(blob(d.controllerState))</ControllerState>"
-            + "<Name Value=\"\" /><PresetRef /></Vst3Preset>"
+            + "<Name Value=\"\(esc(d.name))\" /><PresetRef /></Vst3Preset>"
     }
 
-    static func xml(name: String, annotation: String, devices: [Device], macros: [Macro]) -> String {
+    static func xml(name: String, annotation: String, devices: [Device], macros: [Macro], instrument: Bool = false, chainName: String = "") -> String {
         let m = (0..<16).map { i in i < macros.count ? macros[i] : Macro(name: "Macro \(i + 1)", value: 0) }
         let target = "<AutomationTarget Id=\"0\"><LockEnvelope Value=\"0\" /></AutomationTarget><ModulationTarget Id=\"0\"><LockEnvelope Value=\"0\" /></ModulationTarget>"
         var r = "<LomId Value=\"0\" /><LomIdView Value=\"0\" /><IsExpanded Value=\"true\" /><BreakoutIsExpanded Value=\"false\" />"
@@ -87,7 +89,7 @@ enum RackWriter {
         r += "<ModulationSourceCount Value=\"0\" /><ParametersListWrapper LomId=\"0\" /><Pointee Id=\"0\" /><LastSelectedTimeableIndex Value=\"0\" /><LastSelectedClipEnvelopeIndex Value=\"0\" />"
         r += "<LastPresetRef><Value /></LastPresetRef><LockedScripts /><IsFolded Value=\"false\" /><ShouldShowPresetName Value=\"true\" /><UserName Value=\"\" />"
         r += "<Annotation Value=\"\(esc(annotation))\" /><SourceContext><Value /></SourceContext><MpePitchBendUsesTuning Value=\"true\" /><ViewData Value=\"{}\" />"
-        r += "<OverwriteProtectionNumber Value=\"3076\" /><Branches /><IsBranchesListVisible Value=\"false\" /><IsReturnBranchesListVisible Value=\"false\" />"
+        r += "<OverwriteProtectionNumber Value=\"3076\" /><Branches /><IsBranchesListVisible Value=\"\(chainName.isEmpty ? "false" : "true")\" /><IsReturnBranchesListVisible Value=\"false\" />"
         r += "<IsRangesEditorVisible Value=\"false\" /><AreDevicesVisible Value=\"true\" /><NumVisibleMacroControls Value=\"\(macros.count <= 8 ? 8 : 16)\" />"
         for (i, x) in m.enumerated() {
             r += "<MacroControls.\(i)><LomId Value=\"0\" /><Manual Value=\"\(num(x.value))\" /><MidiControllerRange><Min Value=\"0\" /><Max Value=\"127\" /></MidiControllerRange>\(target)</MacroControls.\(i)>"
@@ -104,17 +106,23 @@ enum RackWriter {
         for i in 0..<16 { r += "<ExcludeMacroFromRandomization.\(i) Value=\"false\" />" }
         for i in 0..<16 { r += "<ExcludeMacroFromSnapshots.\(i) Value=\"false\" />" }
         r += "<AreMacroVariationsControlsVisible Value=\"false\" />"
+        // An Instrument Rack (Live 12 saved one): three more settings, key/velocity zones on the chain.
+        if instrument { r += "<ChainSelectorFilterMidiCtrl Value=\"false\" /><RangeTypeIndex Value=\"1\" /><ShowsZonesInsteadOfNoteNames Value=\"false\" />" }
 
         let devs = devices.enumerated().map { deviceXML($0.element, index: $0.offset) }.joined()
-        let branch = "<AudioEffectBranchPreset Id=\"0\"><Name Value=\"\" /><IsSoloed Value=\"false\" /><DevicePresets>\(devs)</DevicePresets>"
+        let branchTag = instrument ? "InstrumentBranchPreset" : "AudioEffectBranchPreset"
+        let zones = instrument ? "<ZoneSettings><KeyRange><Min Value=\"0\" /><Max Value=\"127\" /><CrossfadeMin Value=\"0\" /><CrossfadeMax Value=\"127\" /></KeyRange>"
+            + "<VelocityRange><Min Value=\"1\" /><Max Value=\"127\" /><CrossfadeMin Value=\"1\" /><CrossfadeMax Value=\"127\" /></VelocityRange></ZoneSettings>" : ""
+        let branch = "<\(branchTag) Id=\"0\"><Name Value=\"\(esc(chainName))\" /><IsSoloed Value=\"false\" /><DevicePresets>\(devs)</DevicePresets>"
             + "<MixerPreset>\(RackTemplates.chainMixer)</MixerPreset>"
             + "<BranchSelectorRange><Min Value=\"0\" /><Max Value=\"0\" /><CrossfadeMin Value=\"0\" /><CrossfadeMax Value=\"0\" /></BranchSelectorRange>"
-            + "<SessionViewBranchWidth Value=\"55\" /><DocumentColorIndex Value=\"67\" /><AutoColored Value=\"true\" /><AutoColorScheme Value=\"0\" /><SourceContext /></AudioEffectBranchPreset>"
+            + "<SessionViewBranchWidth Value=\"55\" /><DocumentColorIndex Value=\"67\" /><AutoColored Value=\"true\" /><AutoColorScheme Value=\"0\" /><SourceContext />\(zones)</\(branchTag)>"
 
+        let groupTag = instrument ? "InstrumentGroupDevice" : "AudioEffectGroupDevice"
         return """
         <?xml version="1.0" encoding="UTF-8"?>
         <Ableton MajorVersion="5" MinorVersion="12.0_12402" SchemaChangeCount="5" Creator="Ableton Live 12.4.16" Revision="e33287a1c79501580a1e0f9f907e320757d3be44">
-        <GroupDevicePreset><OverwriteProtectionNumber Value="3076" /><Device><AudioEffectGroupDevice Id="0">\(r)</AudioEffectGroupDevice></Device>\
+        <GroupDevicePreset><OverwriteProtectionNumber Value="3076" /><Device><\(groupTag) Id="0">\(r)</\(groupTag)></Device>\
         <PresetRef /><BranchPresets>\(branch)</BranchPresets><ReturnBranchPresets /></GroupDevicePreset>
         </Ableton>
 

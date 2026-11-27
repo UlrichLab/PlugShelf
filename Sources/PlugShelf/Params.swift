@@ -1,7 +1,7 @@
 import CPlugHost
 import Foundation
 
-/// `PlugShelf --params <bundle path> <class name> <out.json>`
+/// `PlugShelf --params <bundle path> <class name> <out.json> [preset file]`
 ///
 /// Helper process (like --capture, but without a window): opens one VST3 plugin and writes its
 /// parameters (id, title, unit, default, current value and its text) plus its default state,
@@ -17,6 +17,16 @@ enum ParamsMode {
 
         var err = [CChar](repeating: 0, count: 512)
         guard let h = ph_vst3_load(path, name, 0, &err, Int32(err.count)) else { fail(String(cString: err)) }
+
+        // A maker's preset file: load it into the plugin first, so the parameters and state below are the preset's.
+        var presetInfo: [String: Any]? = nil
+        if args.count >= 4 {
+            if let (method, changed) = PresetState.apply(h, file: URL(fileURLWithPath: args[3])) {
+                presetInfo = ["applied": true, "method": method, "changed": changed]
+            } else {
+                presetInfo = ["applied": false]
+            }
+        }
 
         var cid = [UInt8](repeating: 0, count: 16)
         var cname = [CChar](repeating: 0, count: 128)
@@ -54,6 +64,11 @@ enum ParamsMode {
         var proc: UnsafeMutablePointer<UInt8>?, ctrl: UnsafeMutablePointer<UInt8>?
         var procLen: Int32 = 0, ctrlLen: Int32 = 0
         ph_vst3_states(h, &proc, &procLen, &ctrl, &ctrlLen)
+        if presetInfo != nil {
+            // the component's state now, not the one saved when it was opened
+            var fresh: UnsafeMutablePointer<UInt8>?, freshLen: Int32 = 0
+            if ph_vst3_get_state(h, &fresh, &freshLen) == 0, freshLen > 0 { free(proc); proc = fresh; procLen = freshLen } else { free(fresh) }
+        }
         func hex(_ p: UnsafeMutablePointer<UInt8>?, _ n: Int32) -> String {
             guard let p = p, n > 0 else { return "" }
             return (0..<Int(n)).map { String(format: "%02X", p[$0]) }.joined()
@@ -65,6 +80,7 @@ enum ParamsMode {
             "params": params,
             "proc": hex(proc, procLen),
             "ctrl": hex(ctrl, ctrlLen),
+            "preset": presetInfo ?? NSNull(),
         ]
         guard let d = try? JSONSerialization.data(withJSONObject: obj), (try? d.write(to: out, options: .atomic)) != nil else {
             fail("Cannot save the result")

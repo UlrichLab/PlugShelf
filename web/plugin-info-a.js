@@ -104,7 +104,7 @@ PI('Wurli', 'Arturia’s emulation of the Wurlitzer 200A electric piano.', ['Bar
 // ---- IK Multimedia (T-RackS and Amplitube) ----
 PI('T-RackS 6|T-RackS', 'IK Multimedia’s mixing and mastering suite – a rack for all T-RackS modules with metering.', ['Chains of modules in series or parallel', 'Album assembly and loudness metering']);
 PI('One', 'IK’s all-in-one mastering processor: EQ, compressor, saturation and limiter with simple controls.', ['Quick mastering with few knobs']);
-PI('Bass One', 'IK’s bass processing plugin (part of AmpliTube/T-RackS) for bass guitar and synth bass.');
+PI('Bass One', 'IK’s bass processing plugin for bass guitar and synth bass.');
 PI('Brickwall Limiter', 'IK’s transparent brickwall limiter for mastering.', ['True peak', 'Several styles']);
 PI('British Channel', 'IK’s emulation of an SSL 4000 E channel strip.', ['EQ, dynamics and filters', 'Punchy British console sound']);
 PI('Bus Compressor', 'IK’s SSL-style bus compressor.', ['Mix-bus glue']);

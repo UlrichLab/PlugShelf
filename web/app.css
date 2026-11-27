@@ -358,6 +358,10 @@ details.fails li span { color: var(--dim); }
 .cs-face.none { display: grid; place-items: center; text-align: center; padding: 10px; color: var(--dim); font-size: 11.5px; border-style: dashed; background: none; }
 .cs-name b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cs-name small { display: block; color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-preset { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; background: var(--panel2); border: 1px solid var(--line); border-radius: 7px; padding: 4px 7px; text-align: left; color: var(--tx); font-size: 11.5px; cursor: pointer; }
+.cs-preset:hover { border-color: hsl(var(--h) 60% 55%); }
+.cs-preset b { font: 600 9.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+.cs-preset small { flex-basis: 100%; color: var(--dim); font-size: 10.5px; }
 .cs-tip { color: var(--dim); font-size: 11px; line-height: 1.4; flex: 1; }
 .cs-acts { display: flex; align-items: center; gap: 4px; }
 .cs-acts button { width: 28px; height: 26px; display: grid; place-items: center; background: var(--panel2); border: 1px solid var(--line); border-radius: 7px; color: var(--tx2); padding: 0; font-size: 15px; line-height: 1; }
@@ -369,7 +373,19 @@ details.fails li span { color: var(--dim); }
 .addslot { align-self: center; margin-left: 8px; background: none; border: 1px dashed var(--line2); border-radius: 10px; padding: 10px 14px; color: var(--tx2); font-weight: 600; }
 .addslot:hover { color: var(--tx); border-color: var(--accent); }
 .chainhint { padding: 18px 0 0; max-width: 820px; }
+.chainguide { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; gap: 14px 28px; margin-top: 18px; padding: 14px 16px; border: 1px solid var(--line2); border-radius: 12px; font-size: 12.5px; line-height: 1.55; color: var(--tx2); }
+.chainguide h5 { margin: 0 0 6px; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+.chainguide ul { margin: 0; padding-left: 16px; }
+.chainguide li { margin-bottom: 3px; }
+.chainguide b { color: var(--tx); font-weight: 600; }
+.chainguide ol.steps { list-style: none; margin: 0; padding: 0; }
+.chainguide ol.steps li { margin-bottom: 9px; }
+.chainguide .how { padding-left: 16px; display: flex; flex-direction: column; }
+.chainguide .how .none { color: var(--dim); font-style: italic; }
+.chainguide h5.gen { margin-top: 14px; }
 .dlg.picker { width: min(480px, calc(100vw - 32px)); }
+.pkh { margin: 8px 8px 2px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+.pkh:first-child { margin-top: 2px; }
 .pklist { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
 .pk { display: flex; align-items: center; gap: 8px; background: none; border: 0; border-radius: 7px; padding: 6px 8px; text-align: left; color: var(--tx); font-size: 12.5px; }
 .pk:hover { background: var(--panel2); }
@@ -505,7 +521,3 @@ details.fails li span { color: var(--dim); }
 .hrow .hgap { flex: 1; }
 .porig { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line, rgba(255,255,255,.08)); border-radius: 10px; background: rgba(255,255,255,.025); }
 .porig h5:first-child { margin-top: 0; }
-.psibs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.psibs .osib { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 5px 9px; border-radius: 8px; border: 1px solid var(--line, rgba(255,255,255,.1)); background: transparent; color: var(--tx); font: inherit; font-size: 12px; cursor: pointer; text-align: left; }
-.psibs .osib:hover { border-color: var(--acc, #ff7a3d); }
-.psibs .osib small { font-size: 10px; color: var(--dim); }

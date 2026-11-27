@@ -22,7 +22,7 @@
     u1176: /1176|black 76|fet-?76/i,
     la2a: /la-?2a|white 2a|teletronix/i,
     la3a: /la-?3a/i,
-    cl1b: /cl ?1b|tube-?sta|tube-?tech/i,          // Arturia Comp TUBE-STA models the CL 1B
+    cl1b: /cl ?1b|tube-?tech/i,
     fairchild: /fairchild|\b6[67]0\b|vc-?670/i,
     dbx: /\bdbx\b|\b16[05][ax]?\b|vca-?65/i,          // Arturia Comp VCA-65 models the dbx 165
     distressor: /distressor/i,
@@ -108,11 +108,11 @@
   /** Comparable kinds, for when the library has no emulation of the original. */
   const K = {
     fast: /1176|\b76\b|\bfet\b|distressor|pro-?c|vca|black 76|fet-?76/i,
-    opto: /la-?2a|la-?3a|opto|\b2a\b|cl ?1b|teletronix|white 2a|tube-?sta|leveler/i,
+    opto: /la-?2a|la-?3a|(^|[\s_])opto|\b2a\b|cl ?1b|teletronix|white 2a|leveler/i,
     tubeComp: /fairchild|\b670\b|vari-?mu|dyna-?mu|tube|vc-?670|tube-?sta/i,
     vca: /dbx|vca|\b16[05]\b|ssl|bus|glue|api/i,
     bus: /\bssl\b|bus|glue|\bvca\b|api ?2500|g-?comp|shadow hills|fairchild|\b670\b|townhouse|33609/i,
-    pre: /neve|1073|1084|eq-?73|pre 1973|88rs|610|tube|avalon|v76|console|british|channel/i,
+    pre: /neve|1073|1084|eq-?73|pre 1973|88rs|610|tube|avalon|v76|british|console n\b|manley|voxbox|unison|preamp/i,
     console: /console|ssl|neve|api|amek|british|channel strip|focusrite/i,
     vintageEq: /pultec|eqp|\beq-?p[abg]\b|tube|1073|neve|api|passive|vintage|maag|88rs|sie-?q|eq-?73|sitral/i,
     air: /maag|\bair\b|sie-?q|pultec|eqp|gml|bax|pro-?q/i,

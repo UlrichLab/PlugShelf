@@ -5,7 +5,8 @@
 
 /** Module roles. A plugin family fits a role by its category and/or its name. */
 const CHAIN_ROLES = {
-  preamp:    { name: 'Preamp / Channel', cats: ['Channel Strip'], re: /preamp|pre-?amp|channel ?strip|console|\bneve\b|1073|\b610\b|\bapi\b|\bssl\b|avalon|manley|voxbox|v76|unison|\bstrip\b|\bcs-?1\b/i, not: /meter|analy|2254|33609|\b2500\b|bus ?comp/i },
+  inst:      { name: 'Instrument', re: /(?!)/ },   // filled from instrument plugins in chains.js (roleIndex)
+  preamp:    { name: 'Preamp / Channel', cats: ['Channel Strip'], re: /preamp|pre-?amp|channel ?strip|console|\bneve\b|1073|\b610\b|\bapi\b|\bssl\b|avalon|manley|voxbox|v76|unison|\bstrip\b|\bcs-?1\b/i, not: /meter|analy|2254|33609|\b2500\b|bus ?comp|recall/i },
   eq:        { name: 'EQ', cats: ['EQ'], re: /\beq\b|equali|pultec|eqp|pro-?q|\bq\d\b|maag|tilt|passive eq/i, not: /soothe|gullfoss|unmask|match eq|de[- ]?ess/i },
   dyneq:     { name: 'Dynamic EQ / Resonances', re: /soothe|gullfoss|dynamic ?eq|smart:?eq|smarteq|resonance|pro-?q ?[34]|unmask|trackspacer|bx_dyneq|\bf6\b/i },
   comp:      { name: 'Compressor', cats: ['Dynamics'], re: /compress|\bcomp\b|1176|\b176\b|la-?2a|la-?3a|fairchild|distressor|opto|\bfet\b|\bvca\b|\b76\b|glue|2254|33609|\b2500\b|vari-?mu|fatso|dbx ?160/i,
@@ -29,7 +30,7 @@ const CHAIN_ROLES = {
   mod:       { name: 'Modulation', cats: ['Modulation'], re: /chorus|flang|phas|tremol|vibrato|rotary|leslie|ensemble/i, mode: 'either', not: /stutter|glitch/i },
   filter:    { name: 'Filter', cats: ['Filter'], re: /filter|\bwah/i, mode: 'either', not: /eq\b/i },
   tune:      { name: 'Pitch Correction', re: /auto-?tune|melodyne|pitch ?correct|waves ?tune|graillon|metatune|\btune\b|alterboy|pitchmap/i },
-  pitch:     { name: 'Pitch / Formant', cats: ['Pitch'], re: /pitch|alterboy|octav|formant|harmoni[sz]|shift|vocalsynth/i, mode: 'either' },
+  pitch:     { name: 'Pitch / Formant', cats: ['Pitch'], re: /pitch|alterboy|octav|formant|harmoni[sz]|shift|vocalsynth|h3000|crystallizer/i, mode: 'either', not: /auto-?tune|melodyne|pitchmonster|vovious|tuner/i },
   width:     { name: 'Stereo Width', cats: ['Spatial'], re: /stereo|width|wider|imager|microshift|doubler|haas|panman|spread|panner/i, mode: 'either', not: /meter|analy|scope|5\.[01]|7\.1|360|lfe|surround|dorrough|tuner/i },
   sidechain: { name: 'Sidechain / Pump', re: /shaperbox|volume ?shaper|kickstart|lfo ?tool|trackspacer|\bduck|\bpump|side-?chain|\brift\b/i, not: /midi/i },
   glitch:    { name: 'Glitch / Stutter', re: /stutter|glitch|turnado|effectrix|fragments|portal|graindad|\bgrain|crystallizer|shaperbox|looper/i },
@@ -46,7 +47,7 @@ const CHAIN_RUBRICS = [
   { id: 'drums', name: 'Drums' },
   { id: 'bass', name: 'Bass' },
   { id: 'perc', name: 'Percussion' },
-  { id: 'instr', name: 'Instruments' },
+  { id: 'instr', name: 'Instrument Effects' },
   { id: 'lead', name: 'Trance & Leads' },
   { id: 'mod', name: 'Modulation & FX' },
   { id: 'returns', name: 'Send Effects' },

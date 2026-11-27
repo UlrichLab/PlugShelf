@@ -5,12 +5,13 @@
 #   {"op": "rack", "items": [{"name": ..., "format": ..., "vendor": ...}, ...]}
 #   {"op": "load_preset", "folder": "PlugShelf", "name": "Vocal Chain"}   a rack PlugShelf saved
 #   {"op": "load_user", "folder": "Kontakt Presets", "name": "X.vstpreset"}  any file in the User Library
+#   {"op": "load_core", "root": "drums", "name": "Percussion Core Kit"}  a preset from Live's own library
 #   {"op": "kontakt_block", "tracks": ["KP · Lib - Instr", ...]}  MIDI tracks with Kontakt 8, for the preset builder
 #   {"op": "kontakt_clear", "prefix": "KP · "}   deletes those tracks again
 #   {"op": "inspect"}                                                    what is on the selected track
 #   {"op": "test_track", "action": "create" | "delete", ...}             scratch track for testing
 
-VERSION = "10"
+VERSION = "11"
 
 # Folder names Live uses for each plugin format in its browser.
 FORMAT_FOLDERS = {
@@ -95,6 +96,14 @@ def handle(cs, cmd):
             return {"ok": False, "retry": True, "msg": "Live does not show the rack in its browser yet"}
         cs.queue.append(item)
         return {"ok": True, "msg": "%s → %s" % (cmd.get("name"), track.name)}
+    if op == "load_core":
+        item = find_core_item(cs, cmd.get("root", "drums"), cmd.get("name", ""))
+        if item is None:
+            return {"ok": False, "msg": "%s is not in Live's library" % cmd.get("name")}
+        if cmd.get("instrument"):
+            track = free_instrument_track(cs, track)
+        cs.queue.append(item)
+        return {"ok": True, "msg": "%s → %s" % (item.name, track.name)}
     if op == "find_user":
         item = find_user_item(cs, cmd.get("folder", ""), cmd.get("name", ""))
         if item is None:
@@ -343,6 +352,30 @@ def free_instrument_track(cs, track):
     except Exception as e:
         cs.log_message("PlugShelf: no free track (%s)" % e)
         return track
+
+
+def find_core_item(cs, root, name):
+    """A loadable item in one of Live's browser roots (drums, instruments, audio_effects, …) by name."""
+    want = _nfc(name).lower()
+    stem = want.rsplit(".", 1)[0] if want.endswith((".adg", ".adv")) else want
+    start = getattr(cs.application().browser, root, None)
+    if start is None:
+        return None
+
+    def walk(item, depth):
+        if depth > 6:
+            return None
+        for child in item.children:
+            n = _nfc(child.name).lower()
+            if child.is_loadable and n in (want, stem, stem + ".adg"):
+                return child
+            if child.is_folder or len(child.children) > 0:
+                found = walk(child, depth + 1)
+                if found is not None:
+                    return found
+        return None
+
+    return walk(start, 0)
 
 
 def find_user_item(cs, folder, name):

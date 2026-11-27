@@ -9,6 +9,7 @@ final class RackBuilder {
         var family: String; var role: String; var label: String
         var set: [String: (Double, String)] = [:]
         var macros: [String] = []
+        var preset: String? = nil      // a maker preset file, loaded into the plugin first (see PresetState)
     }
     struct Progress { var running = false; var done = 0; var total = 0; var current = "" }
 
@@ -57,6 +58,7 @@ final class RackBuilder {
         "delay": [("Mix", mix), ("Feedback", feedback), ("Time", ["^time", "delay time"]), ("Mod", ["^mod", "^wow", "flutter", "^age"]), ("Tone", tone)],
         "chorus": [("Mix", mix), ("Depth", ["^depth", "^amount", "^width"]), ("Feedback", feedback)],
         "mod": [("Mix", mix), ("Rate", ["^rate", "^speed", "^freq"]), ("Depth", ["^depth"]), ("Feedback", feedback + ["^resonance"])],
+        "inst": [("Cutoff", ["^cutoff", "filter ?cutoff", "^vcf ?cutoff", "^filter ?freq", "^brightness", "^cut ?off", "^flt.*cutoff"]), ("Reso", ["^reso", "filter ?reso", "^emphasis", "^peak$"]), ("Attack", ["^amp.*attack", "^vca.*attack", "^attack"]), ("Release", ["^amp.*release", "^vca.*release", "^release"]), ("Glide", ["^glide", "^portamento", "^porta"]), ("Volume", ["^master ?vol", "^volume", "^output", "^level$"])],
         "filter": [("Cutoff", ["cutoff", "^freq", "frequency"]), ("Reso", ["^reso", "^q$", "^emphasis"]), ("LFO", ["lfo ?(amount|depth)", "^mod ?depth", "^env(elope)? ?(amount|depth)", "^depth$"]), ("Drive", ["^drive"]), ("Mix", mix)],
         "tune": [("Retune", ["retune", "^speed", "correction", "^amount"]), ("Humanize", ["humani"])],
         "pitch": [("Pitch", ["^pitch", "semitone", "^shift", "transpose"]), ("Mix", mix), ("Detune", ["detune", "^fine", "^cents?"])],
@@ -111,20 +113,20 @@ final class RackBuilder {
 
     // MARK: building
 
-    func start(name: String, annotation: String, slots: [Slot], returns: Bool, library: Library?, load: Bool) -> Bool {
+    func start(name: String, annotation: String, slots: [Slot], returns: Bool, library: Library?, load: Bool, core: String? = nil) -> Bool {
         lock.lock()
         if _progress.running { lock.unlock(); return false }
         _progress = Progress(running: true, done: 0, total: slots.count, current: "")
         _result = nil
         lock.unlock()
         DispatchQueue.global(qos: .userInitiated).async { [self] in
-            let r = build(name: name, annotation: annotation, slots: slots, returns: returns, library: library, load: load)
+            let r = build(name: name, annotation: annotation, slots: slots, returns: returns, library: library, load: load, core: core)
             lock.lock(); _result = r; _progress.running = false; _progress.current = ""; lock.unlock()
         }
         return true
     }
 
-    private func build(name: String, annotation: String, slots: [Slot], returns: Bool, library: Library?, load: Bool) -> [String: Any] {
+    private func build(name: String, annotation: String, slots: [Slot], returns: Bool, library: Library?, load: Bool, core: String? = nil) -> [String: Any] {
         var byFamily: [String: [Plugin]] = [:]
         for p in library?.plugins ?? [] { byFamily[p.family, default: []].append(p) }
 
@@ -148,12 +150,26 @@ final class RackBuilder {
                 skipped.append("\(display) (no VST3)"); continue
             }
             if !native(p) { skipped.append("\(display) (Intel only)"); continue }
-            guard let info = readParams(p) else { skipped.append("\(display) (cannot be opened)"); continue }
+            let isInstrument = slot.role == "inst"
+            if isInstrument && !devices.isEmpty { skipped.append("\(display) (only one instrument per rack)"); continue }
+            var info: [String: Any]? = nil
+            if let preset = slot.preset, !preset.isEmpty {
+                info = readParams(p, preset: preset)
+                if (info?["preset"] as? [String: Any])?["applied"] as? Bool != true {
+                    skipped.append("preset “\(URL(fileURLWithPath: preset).lastPathComponent)” for \(display) (the plugin did not take it)")
+                    info = readParams(p)
+                }
+            } else {
+                info = readParams(p)
+            }
+            guard let info else { skipped.append("\(display) (cannot be opened)"); continue }
 
             let params = (info["params"] as? [[String: Any]]) ?? []
             var knobs: [(String, [String: Any], Double?)] = []
             var used = Set<UInt32>()
-            var want = RackBuilder.targets(role: slot.role, returns: returns)
+            // A loaded preset keeps its own values; only what the chain asks for explicitly is changed.
+            let presetApplied = (info["preset"] as? [String: Any])?["applied"] as? Bool == true
+            var want = presetApplied ? [:] : RackBuilder.targets(role: slot.role, returns: returns)
             for (k, v) in slot.set { want[k] = v }
             if returns, slot.role == "reverb" || slot.role == "delay" { want["Mix"] = (100, "%") }
             // The role's knobs, plus any knob the template asks for that the role does not list.
@@ -188,7 +204,9 @@ final class RackBuilder {
                 cid: RackBuilder.bytes(info["cid"] as? String ?? ""),
                 processorState: info["proc"] as? String ?? "",
                 controllerState: info["ctrl"] as? String ?? "",
-                params: []))
+                params: [], instrument: isInstrument,
+                // "Plugin · Preset", for the rack's chain name and info text
+                name: presetApplied ? "\(display) · \(URL(fileURLWithPath: slot.preset ?? "").deletingPathExtension().lastPathComponent)" : ""))
         }
 
         guard !devices.isEmpty else {
@@ -235,19 +253,34 @@ final class RackBuilder {
         }
 
         guard let lib = Ableton.userLibrary() else { return ["ok": false, "msg": "No Ableton User Library found"] }
-        let folder = lib.appendingPathComponent("Presets/Audio Effects/Audio Effect Rack/PlugShelf", isDirectory: true)
+        let instrument = devices.first?.instrument == true
+        let folder = lib.appendingPathComponent(instrument ? "Presets/Instruments/Instrument Rack/PlugShelf Instruments"
+                                                          : "Presets/Audio Effects/Audio Effect Rack/PlugShelf", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let safe = RackBuilder.fileName(name)
         let file = folder.appendingPathComponent(safe + ".adg")
-        let xml = RackWriter.xml(name: name, annotation: annotation, devices: devices, macros: macros)
+        // Plugins do not show a preset that comes with the rack, and Live ignores device titles in a rack preset:
+        // the presets go into the chain's name (shown in the rack's chain list) and the rack's info text.
+        let presetNames = devices.map(\.name).filter { !$0.isEmpty }
+        let chainName = presetNames.joined(separator: "  |  ")
+        let info = presetNames.isEmpty ? annotation : ([annotation] + ["Presets: " + presetNames.joined(separator: ", ")]).filter { !$0.isEmpty }.joined(separator: " – ")
+        let xml = RackWriter.xml(name: name, annotation: info, devices: devices, macros: macros, instrument: instrument, chainName: chainName)
         guard let gz = RackWriter.gzip(Data(xml.utf8)), (try? gz.write(to: file, options: .atomic)) != nil else {
             return ["ok": false, "msg": "Cannot save the rack"]
         }
 
         var out: [String: Any] = ["ok": true, "path": file.path, "name": safe, "macros": macros.map(\.name),
-                                  "devices": devices.count, "skipped": skipped]
+                                  "devices": devices.count, "skipped": skipped, "instrument": instrument]
+        if let core, !instrument {
+            // no instrument plug-in for this chain: one of Live's own Drum Racks goes first (e.g. a percussion kit)
+            out["core"] = core
+            if load {
+                let c = Ableton.send(["op": "load_core", "root": "drums", "name": core, "instrument": true], timeout: 2)
+                if c["ok"] as? Bool != true { out["coreMsg"] = c["msg"] ?? "Live did not load \(core)" }
+            }
+        }
         if load {
-            let r = RackBuilder.loadIntoLive(safe)
+            let r = instrument ? RackBuilder.loadInstrumentIntoLive(safe) : RackBuilder.loadIntoLive(safe)
             out["loaded"] = r["ok"] as? Bool ?? false
             out["msg"] = r["msg"] ?? ""
             if r["offline"] as? Bool == true { out["offline"] = true }
@@ -261,6 +294,18 @@ final class RackBuilder {
         for attempt in 0..<12 {
             r = Ableton.send(["op": "load_preset", "folder": "PlugShelf", "name": name], timeout: 1.5)
             if r["ok"] as? Bool == true || r["offline"] as? Bool == true || r["retry"] as? Bool != true { return r }
+            if attempt == 3 { _ = Ableton.send(["op": "rescan_browser"], timeout: 1) }
+            Thread.sleep(forTimeInterval: 0.8)
+        }
+        return r
+    }
+
+    /// An Instrument Rack goes onto a MIDI track without an instrument (a new one after the selected track if needed).
+    static func loadInstrumentIntoLive(_ name: String) -> [String: Any] {
+        var r: [String: Any] = [:]
+        for attempt in 0..<12 {
+            r = Ableton.send(["op": "load_user", "folder": "PlugShelf Instruments", "name": name + ".adg", "instrument": true], timeout: 1.5)
+            if r["ok"] as? Bool == true || r["offline"] as? Bool == true { return r }
             if attempt == 3 { _ = Ableton.send(["op": "rescan_browser"], timeout: 1) }
             Thread.sleep(forTimeInterval: 0.8)
         }
@@ -363,19 +408,23 @@ final class RackBuilder {
 
     /// Parameters and default state of a VST3 plugin, from cache or a helper process (two tries:
     /// the very first launch of a freshly installed app can be slowed down by macOS' checks).
-    func readParams(_ p: Plugin) -> [String: Any]? {
-        readParamsOnce(p) ?? readParamsOnce(p)
+    func readParams(_ p: Plugin, preset: String? = nil) -> [String: Any]? {
+        readParamsOnce(p, preset: preset) ?? readParamsOnce(p, preset: preset)
     }
 
-    private func readParamsOnce(_ p: Plugin) -> [String: Any]? {
-        let key = Classify.stableId(p.path, p.liveName, String(Int(p.mtime)))
+    private func readParamsOnce(_ p: Plugin, preset: String? = nil) -> [String: Any]? {
+        var key = Classify.stableId(p.path, p.liveName, String(Int(p.mtime)))
+        if let preset {
+            let mt = (try? FileManager.default.attributesOfItem(atPath: preset)[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            key = Classify.stableId(key, preset, String(Int(mt)))
+        }
         let cache = RackBuilder.cacheDir.appendingPathComponent(key + ".json")
         if let d = try? Data(contentsOf: cache), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { return o }
 
         let exe = Bundle.main.executablePath ?? CommandLine.arguments[0]
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: exe)
-        proc.arguments = ["--params", p.path, p.liveName, cache.path]
+        proc.arguments = ["--params", p.path, p.liveName, cache.path] + (preset.map { [$0] } ?? [])
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
         let done = DispatchSemaphore(value: 0)

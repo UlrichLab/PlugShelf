@@ -1,6 +1,6 @@
 'use strict';
 /* PlugShelf – the classic hardware many plugins emulate. The details panel ("About") shows the original
-   and every other plugin in your library that models the same unit (e.g. all 1176-style compressors).
+   a plugin models (e.g. the 1176 for every 1176-style compressor) with its specs and typical use.
    ORIG(title, text, facts, uses, patterns): patterns are matched against the plugin's name, lower case.
    Written from the makers' published specs; nothing is fetched at runtime. */
 const ORIGINALS = [];

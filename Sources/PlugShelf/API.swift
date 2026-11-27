@@ -273,13 +273,23 @@ final class API {
                     if let n = (v.first as? NSNumber)?.doubleValue { set[k] = (n, v.count > 1 ? (v[1] as? String ?? "") : "") }
                 }
                 return RackBuilder.Slot(family: f, role: role, label: s["label"] as? String ?? "", set: set,
-                                        macros: (s["macros"] as? [String]) ?? [])
+                                        macros: (s["macros"] as? [String]) ?? [], preset: s["preset"] as? String)
             }
             guard !slots.isEmpty else { return .error(400, "Empty chain") }
             lock.lock(); let lib = library; lock.unlock()
             let ok = racks.start(name: b["name"] as? String ?? "PlugShelf Rack", annotation: b["annotation"] as? String ?? "",
-                                 slots: slots, returns: b["returns"] as? Bool ?? false, library: lib, load: b["load"] as? Bool ?? false)
+                                 slots: slots, returns: b["returns"] as? Bool ?? false, library: lib, load: b["load"] as? Bool ?? false,
+                                 core: b["core"] as? String)
             return .json(ok ? ["ok": true] as [String: Any] : ["ok": false, "msg": "A rack is already being built"])
+        case ("GET", "/api/presets"):
+            // maker presets PlugShelf can load into a rack, for one plugin family
+            let fam = r.query["family"] ?? ""
+            lock.lock(); let lib = library; lock.unlock()
+            let items = (lib?.plugins ?? []).filter { $0.family == fam }
+            guard let first = items.first else { return .json(["presets": [Any]()]) }
+            let names = Array(Set(items.flatMap { [$0.name, $0.display] }))
+            let list = Presets.list(names: names, vendor: first.vendor)
+            return .json(["presets": list.map { ["name": $0.name, "path": $0.path, "category": $0.category, "type": $0.type, "info": $0.info] }])
         case ("GET", "/api/rack/build"):
             let p = racks.progress
             var out: [String: Any] = ["running": p.running, "done": p.done, "total": p.total, "current": p.current]

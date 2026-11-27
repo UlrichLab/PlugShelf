@@ -25,8 +25,8 @@ const api = {
 const CATS = {
   Synth: ['Synths', 268], Keys: ['Keys & Piano', 32], Drums: ['Drums', 8], Sampler: ['Sampler', 300], Instrument: ['Other instruments', 245],
   EQ: ['EQ', 190], Dynamics: ['Dynamics', 152], 'Channel Strip': ['Channel Strip', 170], Reverb: ['Reverb', 222], Delay: ['Delay', 205],
-  Modulation: ['Modulation', 320], Distortion: ['Saturation', 14], Filter: ['Filter', 48], Pitch: ['Pitch', 280], Vocal: ['Vocals', 340],
-  Spatial: ['Stereo & space', 236], Mastering: ['Mastering', 40], Analyzer: ['Analysis', 125], Restoration: ['Restoration', 100],
+  Modulation: ['Modulation', 320], Distortion: ['Saturation', 14], Tape: ['Tape & lo-fi', 26], Amp: ['Amps & pedals', 0], Filter: ['Filter', 48], Pitch: ['Pitch', 280], Vocal: ['Vocals', 340],
+  Spatial: ['Stereo & space', 236], Surround: ['Surround', 252], Mastering: ['Mastering', 40], Analyzer: ['Analysis', 125], Restoration: ['Restoration', 100],
   Creative: ['Creative & multi-FX', 290], Utility: ['Utilities', 210], MIDI: ['MIDI', 215], Other: ['Other', 220],
 };
 const cat = c => CATS[c] || CATS.Other;
