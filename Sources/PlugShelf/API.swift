@@ -264,7 +264,7 @@ final class API {
             lock.lock(); let lib = library; lock.unlock()
             let n = thumbs.importRone(lib)
             return .json(["ok": true, "imported": n])
-        case ("POST", "/api/rack/build"):
+        case ("POST", "/api/rack/build"), ("POST", "/api/rack/plan"):
             let b = r.json()
             let slots = ((b["slots"] as? [[String: Any]]) ?? []).compactMap { s -> RackBuilder.Slot? in
                 guard let f = s["family"] as? String, let role = s["role"] as? String else { return nil }
@@ -277,6 +277,7 @@ final class API {
             }
             guard !slots.isEmpty else { return .error(400, "Empty chain") }
             lock.lock(); let lib = library; lock.unlock()
+            if r.path == "/api/rack/plan" { return .json(racks.plan(slots: slots, returns: b["returns"] as? Bool ?? false, library: lib)) }
             let ok = racks.start(name: b["name"] as? String ?? "PlugShelf Rack", annotation: b["annotation"] as? String ?? "",
                                  slots: slots, returns: b["returns"] as? Bool ?? false, library: lib, load: b["load"] as? Bool ?? false,
                                  core: b["core"] as? String)

@@ -70,6 +70,34 @@ final class RackBuilder {
         "meter": [],
     ]
 
+    /// More names makers give the same knob (UAD, Neve, API, Arturia, Valhalla, D16, Ozone …), tried after the role's own.
+    static let more: [String: [String]] = [
+        "Thresh": [#"^comp ?\d? ?thr"#, #"\bthresh"#, #"^max: input gain"#, #"^l thresh"#, #"^limiter gain"#],
+        "Ratio": [#"^comp ?\d? ?rat"#, #"\bratio\b"#],
+        "Attack": [#"^comp ?\d? ?(atk|attack)"#, #"\battack\b"#],
+        "Release": [#"time ?c(o)?nst"#, #"^comp ?\d? ?(rcv|rcvr|rec|release)"#, #"recovery"#, #"\brelease\b"#],
+        "Output": [#"\boutput\b"#, #"^comp ?\d? ?gain"#, #"make ?up"#, #"^output ?\d"#, #"out ?trim"#, #"output level"#, #"output volume"#, #"^level$"#],
+        "Mix": [#"wet ?/ ?dry"#, #"dry ?/ ?wet"#, #"wet ?dry"#, #"^fx$"#, #"echo vol"#, #"parallel mix"#],
+        "Decay": [#"t60"#, #"decay rate"#, #"^damp ?a"#, #"late size"#, #"late feedback"#, #"^feedback$"#, #"^space$"#, #"^time$"#],
+        "PreDly": [#"pre.?dly"#, #"predelay"#, #"delay_?ms"#, #"^early delay"#],
+        "Feedback": [#"repeats"#, #"^intensity"#, #"recirc"#, #"feedback amount"#],
+        "Time": [#"echo ?1? ?time"#, #"^d1 time"#, #"echo ?rate"#, #"repeat rate"#, #"^delay time"#, #"^delay [ab]$"#, #"left delay time"#, #"delay 1 amount"#],
+        "Tone": [#"^ch\d? ?tr$"#, #"high ?cut"#, #"highcut"#, #"low ?pass"#, #"^treble$"#, #"lp ?freq"#, #"\blpf\b"#, #"hf ?decay"#, #"^brightness$"#],
+        "Low": [#"boost ?low"#, #"lowshelf gain"#, #"lo eq gain"#, #"\blf ?gain"#, #"lf boost"#, #"^bass$"#],
+        "High": [#"boost ?high"#, #"highshelf gain"#, #"hi eq gain"#, #"\bhf ?gain"#, #"hf boost"#, #"^treble$"#],
+        "Presence": [#"presence gain"#, #"\bmf ?gain"#, #"^mid$"#, #"^middle$"#, #"^presence$"#],
+        "HPF": [#"highpass"#, #"hp ?filt"#, #"hp ?freq"#, #"low ?cut ?freq"#, #"^low ?cut$"#, #"^lowcut$"#, #"hi pass"#],
+        "Drive": [#"input gain"#, #"mic gain"#, #"line gain"#, #"^input level"#, #"input drive"#, #"character drive"#, #"band 1 drive"#, #"^input$"#, #"^saturation$"#],
+        "Gain": [#"^ch\d? ?vol$"#, #"^volume 1"#, #"^input$"#, #"^drive$"#],
+        "Width": [#"width percent"#, #"global amount"#, #"stereo width"#, #"^width$"#],
+        "Depth": [#"modulation ?depth"#, #"depth"#, #"^ratio$"#],
+        "Rate": [#"mode i rate"#, #"manual rate"#, #"modrate"#, #"lfo rate"#, #"\brate\b"#],
+        "Ceiling": [#"output level"#, #"out(put)? ?trim"#, #"max: output level"#],
+        "Noise": [#"hiss noise"#, #"^noise"#],
+        "Wow": [#"flutter"#, #"wow"#, #"motor"#],
+        "LFO": [#"modulation ?depth"#, #"lfo ?amount"#, #"mod ?depth"#],
+    ]
+
     /// The knob that makes a dynamics module work; it always gets a macro and starts engaged
     /// (compressor −12 dB, limiter −3 dB, clipper −2 dB) unless the template says otherwise.
     static let dynamicsKnob: [String: String] = ["comp": "Thresh", "limiter": "Thresh", "clipper": "Thresh", "multiband": "Depth", "gate": "Thresh", "deess": "Thresh"]
@@ -126,7 +154,15 @@ final class RackBuilder {
         return true
     }
 
-    private func build(name: String, annotation: String, slots: [Slot], returns: Bool, library: Library?, load: Bool, core: String? = nil) -> [String: Any] {
+    /// Which macros a chain would get, per module – without saving anything (for the chain's description).
+    /// One plan at a time: requests from the page queue up instead of opening plugins side by side.
+    private let planLock = NSLock()
+    func plan(slots: [Slot], returns: Bool, library: Library?) -> [String: Any] {
+        planLock.lock(); defer { planLock.unlock() }
+        return build(name: "plan", annotation: "", slots: slots, returns: returns, library: library, load: false, dry: true)
+    }
+
+    private func build(name: String, annotation: String, slots: [Slot], returns: Bool, library: Library?, load: Bool, core: String? = nil, dry: Bool = false) -> [String: Any] {
         var byFamily: [String: [Plugin]] = [:]
         for p in library?.plugins ?? [] { byFamily[p.family, default: []].append(p) }
 
@@ -138,12 +174,15 @@ final class RackBuilder {
         var found: [[(label: String, param: [String: Any], target: Double?)]] = []
         var later: [[(label: String, param: [String: Any], target: Double?)]] = []
         var roles: [String] = []
+        var allParams: [[[String: Any]]] = []      // per device: every parameter, for filling up the macros
+        var slotOf: [Int] = []                     // per device: its slot in `slots`
+        var unusable: [String] = []                // families whose plugin cannot be opened (crashes, licence)
 
-        for slot in slots {
+        for (slotIndex, slot) in slots.enumerated() {
             let items = byFamily[slot.family] ?? []
             let display = items.first?.display ?? slot.family
-            lock.lock(); _progress.current = display; lock.unlock()
-            defer { lock.lock(); _progress.done += 1; lock.unlock() }
+            if !dry { lock.lock(); _progress.current = display; lock.unlock() }
+            defer { if !dry { lock.lock(); _progress.done += 1; lock.unlock() } }
 
             let native = { (p: Plugin) in p.archs.isEmpty || p.archs.contains("arm64") || Scanner.machine != "arm64" }
             guard let p = items.filter({ $0.format == "VST3" && $0.status == "ok" && $0.liveFailed != true }).sorted(by: { native($0) && !native($1) }).first else {
@@ -162,7 +201,7 @@ final class RackBuilder {
             } else {
                 info = readParams(p)
             }
-            guard let info else { skipped.append("\(display) (cannot be opened)"); continue }
+            guard let info else { skipped.append("\(display) (cannot be opened)"); unusable.append(slot.family); continue }
 
             let params = (info["params"] as? [[String: Any]]) ?? []
             var knobs: [(String, [String: Any], Double?)] = []
@@ -178,7 +217,8 @@ final class RackBuilder {
                 if let pats = RackBuilder.allSpecs[label] { specs.append((label, pats)) }
             }
             for (label, patterns) in specs {
-                guard let prm = RackBuilder.match(params, patterns, used) else { continue }
+                guard let prm = RackBuilder.match(params, patterns + (RackBuilder.more[label] ?? []), used,
+                                                  stepped: RackBuilder.steppedOK.contains(label)) else { continue }
                 used.insert(RackBuilder.pid(prm))
                 // A limiter/clipper without a threshold knob uses its input gain instead: −3 dB threshold = +3 dB gain.
                 var w = want[label]
@@ -200,6 +240,8 @@ final class RackBuilder {
             found.append(first)
             later.append(rest.filter { $0.2 != nil } + rest.filter { $0.2 == nil })
             roles.append(slot.role)
+            allParams.append(params)
+            slotOf.append(slotIndex)
             devices.append(RackWriter.Device(
                 cid: RackBuilder.bytes(info["cid"] as? String ?? ""),
                 processorState: info["proc"] as? String ?? "",
@@ -210,7 +252,7 @@ final class RackBuilder {
         }
 
         guard !devices.isEmpty else {
-            return ["ok": false, "msg": "None of these plugins can go into a rack as VST3.", "skipped": skipped]
+            return ["ok": false, "msg": "None of these plugins can go into a rack as VST3.", "skipped": skipped, "unusable": unusable]
         }
 
         // Main knob of every module first, then second knobs, up to 16 macros.
@@ -226,19 +268,43 @@ final class RackBuilder {
         // Phase 0: the working knob of every compressor / limiter / clipper, so none is left without a macro.
         var dyn: [[(label: String, param: [String: Any], target: Double?)]] = []
         for (d, knobs) in found.enumerated() {
-            if let main = RackBuilder.dynamicsKnob[roles[d]], let k = knobs.first, k.label == main {
+            if roles[d] == "inst" {
+                // the synth's own knobs (cutoff, resonance, envelope …) come before everything else, up to 6
+                let all = knobs + later[d]
+                dyn.append(Array(all.prefix(6)))
+                found[d] = []
+                later[d] = Array(all.dropFirst(6))
+            } else if let main = RackBuilder.dynamicsKnob[roles[d]], let k = knobs.first, k.label == main {
                 dyn.append([k]); found[d].removeFirst()
             } else { dyn.append([]) }
         }
-        for phase in [dyn, found, later] {
+        // Then every module's second knob (so each plugin has two before any gets a third), then the rest.
+        var second: [[(label: String, param: [String: Any], target: Double?)]] = later.map { _ in [] }
+        for d in later.indices {
+            let have = dyn[d].count + found[d].count
+            if have < 2, !later[d].isEmpty { second[d] = Array(later[d].prefix(2 - have)); later[d].removeFirst(second[d].count) }
+        }
+        var laterQueue: [(d: Int, knob: (label: String, param: [String: Any], target: Double?))] = []
+        for (k, phase) in [dyn, found, second, later].enumerated() {
             var round = 0
             while true {
                 var any = false
-                for (d, knobs) in phase.enumerated() where round < knobs.count { any = true; queue.append((d, knobs[round])) }
+                for (d, knobs) in phase.enumerated() where round < knobs.count { any = true; if k < 3 { queue.append((d, knobs[round])) } else { laterQueue.append((d, knobs[round])) } }
                 if !any { break }
                 round += 1
             }
         }
+        // a plugin whose own knobs give fewer than two macros takes further knobs before the others get more
+        var reserve = 0
+        do {
+            var have = [Int](repeating: 0, count: devices.count)
+            for q in queue { have[q.d] += 1 }
+            for d in devices.indices {
+                let need = devices[d].instrument ? 6 : 2     // a synth gets at least 6
+                if have[d] < need { reserve += min(need - have[d], RackBuilder.extraKnobs(allParams[d]).count) }
+            }
+        }
+        queue += laterQueue.prefix(max(0, 16 - queue.count - reserve))
         for (d, knob) in queue where macros.count < 16 {
             do {
                 let (label, prm, target) = knob
@@ -251,6 +317,39 @@ final class RackBuilder {
                 macros.append(RackWriter.Macro(name: "\(prefixes[d]) \(label)", value: (pos * 127 * 1000).rounded() / 1000))
             }
         }
+
+        // Every plugin gets at least 2 macros, and a rack at least 8: further useful knobs, taking turns across the modules.
+        var used = devices.map { Set($0.params.map(\.paramId)) }
+        let picks = allParams.map { RackBuilder.extraKnobs($0) }
+        func addExtra(_ d: Int) -> Bool {
+            guard macros.count < 16, let prm = picks[d].first(where: { !used[d].contains(RackBuilder.pid($0)) }) else { return false }
+            used[d].insert(RackBuilder.pid(prm))
+            let lo = (prm["pmin"] as? Double) ?? 0, hi = (prm["pmax"] as? Double) ?? 1
+            let norm = prm["cur"] as? Double ?? 0
+            let plain = RackBuilder.plain(prm, at: norm) ?? (lo + norm * (hi - lo))
+            let pos = hi != lo ? max(0, min(1, (plain - lo) / (hi - lo))) : 0
+            devices[d].params.append(RackWriter.Mapping(paramId: RackBuilder.pid(prm), macro: macros.count, min: lo, max: hi))
+            macros.append(RackWriter.Macro(name: "\(prefixes[d]) \(RackBuilder.shortTitle(prm["title"] as? String ?? ""))",
+                                           value: (pos * 127 * 1000).rounded() / 1000))
+            return true
+        }
+        // a synth gets more (it is what you play): at least 6, an effect at least 2
+        for d in devices.indices { while devices[d].params.count < (devices[d].instrument ? 6 : 2), addExtra(d) {} }
+        while macros.count < RackBuilder.minMacros {
+            var any = false
+            for d in devices.indices where macros.count < RackBuilder.minMacros { if addExtra(d) { any = true } }
+            if !any { break }
+        }
+
+        // per slot: the knob labels on macros (for the chain's description)
+        var slotMacros: [String: [String]] = [:]
+        for (d, dev) in devices.enumerated() {
+            slotMacros[String(slotOf[d])] = dev.params.map { m in
+                let n = macros[m.macro].name
+                return n.hasPrefix(prefixes[d] + " ") ? String(n.dropFirst(prefixes[d].count + 1)) : n
+            }
+        }
+        if dry { return ["ok": true, "macros": macros.map(\.name), "slotMacros": slotMacros, "skipped": skipped, "unusable": unusable] }
 
         guard let lib = Ableton.userLibrary() else { return ["ok": false, "msg": "No Ableton User Library found"] }
         let instrument = devices.first?.instrument == true
@@ -270,7 +369,7 @@ final class RackBuilder {
         }
 
         var out: [String: Any] = ["ok": true, "path": file.path, "name": safe, "macros": macros.map(\.name),
-                                  "devices": devices.count, "skipped": skipped, "instrument": instrument]
+                                  "devices": devices.count, "skipped": skipped, "instrument": instrument, "slotMacros": slotMacros, "unusable": unusable]
         if let core, !instrument {
             // no instrument plug-in for this chain: one of Live's own Drum Racks goes first (e.g. a percussion kit)
             out["core"] = core
@@ -312,6 +411,52 @@ final class RackBuilder {
         return r
     }
 
+    static let minMacros = 8
+
+    /// Further knobs worth a macro when a rack has fewer than 8: the musically useful ones first, then any
+    /// other automatable, continuous knob – never bypass, mode or meter switches, MIDI learn and the like.
+    static func extraKnobs(_ params: [[String: Any]]) -> [[String: Any]] {
+        let skip = try! NSRegularExpression(pattern: #"bypass|^on$|on/off|power|enable|active|midi|learn|program|preset|meter|oversampl|^parameter ?#|^param ?\d|mode$|^mode|select|link|solo|mute|polarity|invert|channel|zoom|page|^ui|display|undo|redo|^sync|panic|reset|random|lock|^hq|quality|latency|^tuning|voices|^poly|^unison voices|velocity|aftertouch|pitch ?bend|mod ?wheel|^bank"#, options: .caseInsensitive)
+        let good = [#"^mix"#, #"dry ?/ ?wet|^wet"#, #"^amount"#, #"^drive|^satur"#, #"cutoff"#, #"^reso"#, #"^input"#, #"thresh"#, #"^attack"#, #"^release"#,
+                    #"^decay"#, #"^time|delay time"#, #"^feedback"#, #"^size"#, #"pre.?delay"#, #"^width"#, #"^depth"#, #"^rate|^speed"#, #"^tone|^colou?r|^character"#,
+                    #"^low|^bass"#, #"^high|^treble|^air"#, #"^mid"#, #"^freq"#, #"^macro|^timbre|^brightness"#, #"^output|^gain$|^level$|^volume"#]
+        func title(_ p: [String: Any]) -> String { p["title"] as? String ?? "" }
+        let ok = params.filter { p in
+            let f = (p["flags"] as? Int) ?? 1
+            let t = title(p)
+            // automatable, not read-only / hidden / program change / bypass; continuous or with many steps
+            guard f & 1 != 0, f & (2 | 16 | 32768 | 65536) == 0, !t.isEmpty else { return false }
+            let steps = (p["steps"] as? Int) ?? 0
+            guard steps == 0 || steps > 8 else { return false }
+            return skip.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) == nil
+        }
+        var out: [[String: Any]] = []
+        var seen = Set<UInt32>()
+        for pat in good {
+            for p in ok where !seen.contains(pid(p)) && title(p).range(of: pat, options: [.regularExpression, .caseInsensitive]) != nil {
+                out.append(p); seen.insert(pid(p))
+            }
+        }
+        for p in ok where !seen.contains(pid(p)) { out.append(p); seen.insert(pid(p)) }
+        // a plugin with only stepped controls (e.g. Studio D Chorus: one mode selector) offers those
+        if out.isEmpty {
+            out = params.filter { p in
+                let f = (p["flags"] as? Int) ?? 1, t = title(p), steps = (p["steps"] as? Int) ?? 0
+                return f & 1 != 0 && f & (2 | 16 | 32768 | 65536) == 0 && steps >= 2 && !t.isEmpty
+                    && t.range(of: #"bypass|power|meter|midi|program|preset|oversampl|dither"#, options: [.regularExpression, .caseInsensitive]) == nil
+            }
+        }
+        return out
+    }
+
+    /// A short macro label from a plugin's parameter title ("Amplifier Env Release" → "Amp Env Release").
+    static func shortTitle(_ t: String) -> String {
+        var s = t.replacingOccurrences(of: "Amplifier", with: "Amp").replacingOccurrences(of: "Frequency", with: "Freq")
+            .replacingOccurrences(of: "Resonance", with: "Reso").replacingOccurrences(of: "Envelope", with: "Env")
+        if s.count > 16 { s = String(s.prefix(16)).trimmingCharacters(in: .whitespaces) }
+        return s
+    }
+
     // MARK: helpers
 
     static func pid(_ p: [String: Any]) -> UInt32 {
@@ -336,7 +481,10 @@ final class RackBuilder {
     }
 
     /// First usable parameter whose title matches the patterns, tried in order.
-    static func match(_ params: [[String: Any]], _ patterns: [String], _ used: Set<UInt32>) -> [String: Any]? {
+    /// Knobs that may be stepped switches on vintage units (a 4-position ratio, a 6-position attack); never Mix, Width or Rate.
+    static let steppedOK: Set<String> = ["Thresh", "Ratio", "Attack", "Release", "Time", "Drive", "Gain", "Output", "HPF", "Low", "High", "Presence", "Tone", "PreDly", "Decay", "Freq"]
+
+    static func match(_ params: [[String: Any]], _ patterns: [String], _ used: Set<UInt32>, stepped allowStepped: Bool = false) -> [String: Any]? {
         let usable = params.filter { p in
             let f = (p["flags"] as? Int) ?? 0
             let steps = (p["steps"] as? Int) ?? 0
@@ -348,6 +496,22 @@ final class RackBuilder {
         for pat in patterns {
             guard let re = try? NSRegularExpression(pattern: pat, options: [.caseInsensitive]) else { continue }
             if let hit = usable.first(where: { p in
+                let t = (p["title"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+                return re.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) != nil
+            }) { return hit }
+        }
+        // Stepped knobs (attack, release, ratio of UAD/Neve/API units with 3–11 positions) when nothing continuous fits;
+        // on/off switches (1 step) stay out.
+        guard allowStepped else { return nil }
+        let stepped = params.filter { p in
+            let f = (p["flags"] as? Int) ?? 0
+            let steps = (p["steps"] as? Int) ?? 0
+            return f & (1 << 1) == 0 && f & (1 << 4) == 0 && f & (1 << 15) == 0 && f & (1 << 16) == 0 && steps >= 2 && steps < 12
+                && !used.contains(pid(p))
+        }
+        for pat in patterns {
+            guard let re = try? NSRegularExpression(pattern: pat, options: [.caseInsensitive]) else { continue }
+            if let hit = stepped.first(where: { p in
                 let t = (p["title"] as? String ?? "").trimmingCharacters(in: .whitespaces)
                 return re.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) != nil
             }) { return hit }
@@ -420,6 +584,9 @@ final class RackBuilder {
         }
         let cache = RackBuilder.cacheDir.appendingPathComponent(key + ".json")
         if let d = try? Data(contentsOf: cache), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { return o }
+        // a plugin that crashed or refused to open is not tried again until it changes (the key holds its file date)
+        let failed = RackBuilder.cacheDir.appendingPathComponent(key + ".failed")
+        if FileManager.default.fileExists(atPath: failed.path) { return nil }
 
         let exe = Bundle.main.executablePath ?? CommandLine.arguments[0]
         let proc = Process()
@@ -435,7 +602,11 @@ final class RackBuilder {
             _ = done.wait(timeout: .now() + 2)
             return nil
         }
-        guard let d = try? Data(contentsOf: cache), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+        guard let d = try? Data(contentsOf: cache), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else {
+            // remembered only for a real failure of the helper (crash, licence error), not for a slow first start
+            if proc.terminationReason == .uncaughtSignal || proc.terminationStatus != 0 { FileManager.default.createFile(atPath: failed.path, contents: nil) }
+            return nil
+        }
         return o
     }
 }

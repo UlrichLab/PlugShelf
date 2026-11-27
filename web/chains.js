@@ -30,15 +30,27 @@ function chainFam(f) {
   return { name: f.name, vendor: f.vendor, category: f.category, kind: f.kind, names: [...new Set(f.items.map(p => p.name))] };
 }
 
+/** Plugins the rack builder could not open (crash, licence): not picked for chains any more. */
+const rackBad = () => new Set(settings().rackBad || []);
+function noteUnusable(keys) {
+  const add = (keys || []).filter(k => !(settings().rackBad || []).includes(k));
+  if (!add.length) return;
+  settings().rackBad = [...(settings().rackBad || []), ...add];
+  roleCache = null;
+  saveUser();
+}
+
 /** role -> family keys of loadable, visible effect plugins that fit it */
 function roleIndex() {
-  const sig = S.user.hidden.join(',') + '|' + settings().showAAX;
+  const sig = S.user.hidden.join(',') + '|' + settings().showAAX + '|' + (settings().rackBad || []).length;
   if (roleCache && roleCache.sig === sig) return roleCache.map;
-  const fx = S.fams.filter(f => f.loadable && showable(f) && !S.user.hidden.includes(f.key) && f.kind !== 'inst');
+  // only plugins that can go into the Ableton rack (VST3) – Live's own devices cannot
+  const bad = rackBad();
+  const fx = S.fams.filter(f => f.loadable && showable(f) && !S.user.hidden.includes(f.key) && !bad.has(f.key) && f.kind !== 'inst' && f.items.some(p => p.format === 'VST3' && usable(p)));
   const map = {};
   for (const r of Object.keys(CHAIN_ROLES)) map[r] = fx.filter(f => chainRoleFits(r, chainFam(f))).map(f => f.key);
   // instruments: an Instrument Rack needs the VST3
-  map.inst = S.fams.filter(f => f.loadable && showable(f) && !S.user.hidden.includes(f.key) && f.kind === 'inst'
+  map.inst = S.fams.filter(f => f.loadable && showable(f) && !S.user.hidden.includes(f.key) && !bad.has(f.key) && f.kind === 'inst'
     && f.items.some(p => p.format === 'VST3' && usable(p))).map(f => f.key);
   roleCache = { sig, map };
   return map;
@@ -76,6 +88,7 @@ function deviceMatches(slot) {
   const re = new RegExp(slot.device, 'i');
   // Surround versions (Waves 360, 5.1) never stand in for stereo hardware.
   return S.fams.filter(f => f.loadable && f.kind !== 'inst' && showable(f) && !S.user.hidden.includes(f.key)
+    && f.items.some(p => p.format === 'VST3' && usable(p)) && !rackBad().has(f.key)
     && re.test(famText(f)) && !/\b360\b|\b5\.[01]\b|\blfe/i.test(famText(f))).map(f => f.key);
 }
 
@@ -302,6 +315,8 @@ function renderChains(animate = false) {
     swapped = true;
   });
   if (swapped) persistChain();
+  // macros per module are worked out again for the current plugins (planMacros, cached per layout)
+  ch.slots.forEach(s => { delete s._macros; });
   const slots = ch.slots.map((s, i) => {
     const f = s.family && S.famBy.get(s.family);
     const count = (idx[s.role] || []).length;
@@ -361,6 +376,7 @@ function renderChains(animate = false) {
   ${chainGuide(ch)}
   <p class="hint chainhint">Click a plugin to pick another one. The lock keeps a module when you roll. “Load in Live” builds an Ableton rack (VST3 versions, key knobs on named macros at the starting values) and puts it on the selected track.</p>`;
   chainPics();
+  planMacros();
 }
 
 /* ---------- guide below the chain ---------- */
@@ -458,12 +474,16 @@ function chainGuide(ch) {
     const f = s.family && S.famBy.get(s.family);
     const vals = s.set && Object.keys(s.set).length ? 'Starting values: ' + Object.entries(s.set).map(([k, v]) => setLabel(k, v)).join(', ') + '.' : '';
     const tip = (s.tip || '').trim();
-    const r = ROLE_HOW[s.role];
-    const big = /^(master|mixbus)$/.test(ch.rubric);
-    const extra = r && tip.length < 40 ? (big && r[1]) || r[0] : '';
+    const extra = slotExtraTip(s, ch);
     const how = [tip, extra, vals].filter(Boolean).map(t => `<span>${esc(t)}</span>`).join('') || `<span class="none">Set to taste.</span>`;
     const pre = s.preset ? `<span>Preset: <b>${esc(s.preset.name)}</b>${s.preset.type ? ' (' + esc(s.preset.type) + ')' : ''}${s.preset.info ? ' – ' + esc(s.preset.info) : ''}</span>` : '';
-    return `<li><b>${i + 1}. ${esc(f ? f.name : s.core ? s.core + ' (Live Drum Rack)' : s.label)}</b><div class="how">${pre}${how}</div></li>`;
+    // the macros the rack gives this plugin (worked out by the app), and what the text asks for but the plugin has no knob for
+    let mac = '';
+    if (f && Array.isArray(s._macros)) {
+      const missing = macroWishes(s, ch).filter(w => !s._macros.includes(w));
+      mac = `<div class="macs">${s._macros.length ? `<em>Macros</em>${s._macros.map(m => `<span>${esc(m)}</span>`).join('')}` : '<em>No macro</em>'}${missing.length ? `<small>no matching knob in this plugin: ${esc(missing.join(', '))}</small>` : ''}</div>`;
+    } else if (f) mac = '<div class="macs"><em>Macros</em><small>working out…</small></div>';
+    return `<li><b>${i + 1}. ${esc(f ? f.name : s.core ? s.core + ' (Live Drum Rack)' : s.label)}</b><div class="how">${pre}${how}</div>${mac}</li>`;
   });
   const general = CHAIN_ADJUST[ch.rubric] || (String(ch.rubric).startsWith('ua-') ? CHAIN_ADJUST.uad : []);
   return `<div class="chainguide">
@@ -475,12 +495,86 @@ function chainGuide(ch) {
 
 /* ---------- Ableton racks ---------- */
 
+/* ---------- macros for what the description says to set ---------- */
+
+/** Knob labels the rack knows per role (mirrors RackBuilder.macroSpecs in Racks.swift). */
+const ROLE_KNOBS = {
+  comp: ['Thresh', 'Ratio', 'Attack', 'Release', 'Mix', 'Output'], multiband: ['Depth', 'Output'], limiter: ['Thresh', 'Ceiling'],
+  clipper: ['Thresh', 'Output'], gate: ['Thresh', 'Range', 'Release', 'Hold'], transient: ['Attack', 'Sustain'], deess: ['Thresh', 'Freq'],
+  eq: ['Low', 'High', 'HPF', 'Presence', 'Output', 'Tone'], dyneq: ['Depth', 'Mix'], sat: ['Drive', 'Mix', 'Tone'], dist: ['Drive', 'Mix', 'Tone'],
+  amp: ['Gain', 'Tone'], tape: ['Drive', 'Wow', 'Noise', 'Mix'], crush: ['Crush', 'Mix', 'Noise'], exciter: ['Amount', 'Mix'],
+  reverb: ['Mix', 'Decay', 'PreDly', 'Tone'], delay: ['Mix', 'Feedback', 'Time', 'Mod', 'Tone'], chorus: ['Mix', 'Depth', 'Feedback'],
+  mod: ['Mix', 'Rate', 'Depth', 'Feedback'], filter: ['Cutoff', 'Reso', 'LFO', 'Drive', 'Mix'], tune: ['Retune', 'Humanize'],
+  pitch: ['Pitch', 'Mix', 'Detune'], width: ['Width'], sidechain: ['Depth', 'Rate'], glitch: ['Mix'],
+  preamp: ['Drive', 'Output', 'High', 'HPF', 'Low'], suite: ['Output'], inst: ['Cutoff', 'Reso', 'Attack', 'Release', 'Glide', 'Volume'],
+};
+/** What a description talks about → the knob that sets it. Checked in this order. */
+const SAYS = [
+  [/high-?pass|low[- ]?cut|\bhpf\b|rumble/, 'HPF'], [/low-?pass|high[- ]?cut|roll(s|ed)? off|soft(er)? top|band-?limit|darker|filter the repeats|filtered repeats|low-pass the/, 'Tone'],
+  [/ceiling|dbtp/, 'Ceiling'], [/threshold|gain reduction|\d\s*(–\s*\d+\s*)?db\b(?! (at|of boost))|peak reduction|catch(es)? the peaks|level steady|even level|compress|limit(ing)?\b|squash|crush the|glue|de-?ess|the “s”|sibilan|duck/, 'Thresh'],
+  [/ratio|\d+(\.\d)?\s*:\s*1/, 'Ratio'], [/attack|snap|punch/, 'Attack'], [/release|recovery|breathe/, 'Release'],
+  [/\bmix\b|blend|parallel|wet|send|amount|low in the mix|keep the level/, 'Mix'], [/feedback|repeats|regen|self-?oscillat/, 'Feedback'],
+  [/decay|reverb time|tail|\b\d(\.\d)?\s*(–\s*\d+(\.\d)?\s*)?s\b|long, |cavernous|endless|freeze/, 'Decay'], [/pre-?delay/, 'PreDly'],
+  [/dotted|\b1\/\d+|\bms\b|delay time|slapback|\bsync/, 'Time'], [/wow|flutter|wobble|warble/, 'Wow'], [/noise|hiss|vinyl|crackle|dust/, 'Noise'],
+  [/drive|satur|distort|grit|warmth|warm|harmonic|crunch|overdrive|bite|colour|color|thicken|hit .* hard|push/, 'Drive'], [/\bgain\b|crunch/, 'Gain'],
+  [/cutoff|filter|low-?pass at|sweep|squelch|wah/, 'Cutoff'], [/resonan|squelch|scream/, 'Reso'], [/\blfo\b|movement|envelope|moving/, 'LFO'],
+  [/width|wide|widen|stereo|spread|mono/, 'Width'], [/\brate\b|speed|in time|synced|tempo|1\/(8|16)/, 'Rate'], [/depth|deep|chorus|intensit/, 'Depth'],
+  [/\bair\b|high shelf|top end|bright|lift .*k?hz|1[0-6]\s*khz|treble|open(s)? up|shimmer/, 'High'], [/low end|low shelf|low-end|\bbass\b|\d0\s*hz|kick|\bsub\b|weight|bottom|bump/, 'Low'],
+  [/presence|\bmids?\b|mud|200|300|400|2–5 khz|crack|body|nasal|boxy/, 'Presence'], [/glide|portamento/, 'Glide'], [/octave|semitone|pitch/, 'Pitch'], [/detune|cents/, 'Detune'],
+  [/retune/, 'Retune'], [/bit|sample.?rate|crush/, 'Crush'], [/sustain|tight/, 'Sustain'], [/\bhold\b/, 'Hold'], [/\brange\b|floor/, 'Range'],
+  [/frequenc|\bkhz\b/, 'Freq'], [/output|make-?up|match the level|loudness|louder/, 'Output'], [/excit|harmonics|until it is (just )?audible/, 'Amount'],
+];
+/** The knobs a module's description asks for, in the order they come up (only those its kind of module has). */
+function macroWishes(s, ch) {
+  const knobs = ROLE_KNOBS[s.role] || [];
+  const text = [s.tip, slotExtraTip(s, ch), ...(s.set ? Object.keys(s.set).map(k => SET_NAMES[k] || k) : [])].join(' ').toLowerCase();
+  const out = [];
+  for (const [re, label] of SAYS) if (knobs.includes(label) && re.test(text) && !out.includes(label)) out.push(label);
+  for (const m of s.macros || []) if (!out.includes(m)) out.push(m);
+  return out;
+}
+/** The extra starting tip the guide adds when a module's own tip says little (see chainGuide). */
+function slotExtraTip(s, ch) {
+  const r = ROLE_HOW[s.role];
+  const tip = (s.tip || '').trim();
+  return r && tip.length < 40 ? (/^(master|mixbus)$/.test(ch?.rubric) && r[1]) || r[0] : '';
+}
+/** The slots as the rack builder takes them: instrument first, then the effects. */
+function rackSlots(ch) {
+  const ordered = [...ch.slots.filter(s => s.family && s.role === 'inst').slice(0, 1), ...ch.slots.filter(s => s.family && s.role !== 'inst')];
+  return { ordered, slots: ordered.map(s => ({ family: s.family, role: s.role, label: s.label, set: s.set || {}, macros: macroWishes(s, ch), ...(s.preset ? { preset: s.preset.path } : {}) })) };
+}
+
+// which macros each module gets – asked from the app (no file is written), cached per chain layout
+const macroPlans = new Map();
+let planTimer = null;
+function planMacros() {
+  clearTimeout(planTimer);
+  planTimer = setTimeout(async () => {
+    const ch = C.chain;
+    if (!ch || S.view !== 'chains') return;
+    const { ordered, slots } = rackSlots(ch);
+    if (!slots.length) return;
+    const sig = JSON.stringify([slots, ch.rubric === 'returns']);
+    let plan = macroPlans.get(sig);
+    if (!plan) {
+      try { plan = await api.post('/api/rack/plan', { slots, returns: ch.rubric === 'returns' }); } catch { return; }
+      noteUnusable(plan?.unusable);
+      if (!plan?.ok) return;
+      macroPlans.set(sig, plan);
+    }
+    if (C.chain !== ch) return;
+    ordered.forEach((s, i) => { s._macros = plan.slotMacros?.[String(i)] || []; });
+    const g = $('.chainguide');
+    if (g) { const t = document.createElement('div'); t.innerHTML = chainGuide(ch); g.replaceWith(t.firstElementChild); }
+  }, 250);
+}
+
 /** Builds an Audio Effect Rack (.adg) from the chain; with `load`, puts it on Live's selected track. */
 async function buildRack(name, load) {
   const ch = C.chain;
   // the instrument goes first; an Instrument Rack lands on a MIDI track
-  const ordered = [...ch.slots.filter(s => s.family && s.role === 'inst').slice(0, 1), ...ch.slots.filter(s => s.family && s.role !== 'inst')];
-  const slots = ordered.map(s => ({ family: s.family, role: s.role, label: s.label, set: s.set || {}, macros: s.macros || [], ...(s.preset ? { preset: s.preset.path } : {}) }));
+  const { slots } = rackSlots(ch);
   const core = ch.slots.find(s => s.role === 'inst' && !s.family && s.core)?.core;
   if (!slots.length) return;
   let r;
@@ -502,6 +596,7 @@ async function buildRack(name, load) {
     C.building = false;
     renderChains();
     const res = p.result || {};
+    noteUnusable(res.unusable);
     const skipped = res.skipped?.length ? ` Not in the rack: ${res.skipped.join(', ')}.` : '';
     if (!res.ok) return toast((res.msg || 'Cannot build the rack') + skipped, 'err');
     if (load) {

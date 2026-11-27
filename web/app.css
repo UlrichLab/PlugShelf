@@ -383,6 +383,10 @@ details.fails li span { color: var(--dim); }
 .chainguide .how { padding-left: 16px; display: flex; flex-direction: column; }
 .chainguide .how .none { color: var(--dim); font-style: italic; }
 .chainguide h5.gen { margin-top: 14px; }
+.chainguide .macs { padding-left: 16px; margin-top: 3px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.chainguide .macs em { font: 600 9.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); font-style: normal; margin-right: 2px; }
+.chainguide .macs span { font: 600 10.5px var(--mono); color: var(--tx); background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; }
+.chainguide .macs small { flex-basis: 100%; color: var(--dim); font-size: 10.5px; }
 .dlg.picker { width: min(480px, calc(100vw - 32px)); }
 .pkh { margin: 8px 8px 2px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
 .pkh:first-child { margin-top: 2px; }
